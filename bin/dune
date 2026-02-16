@@ -1,0 +1,4 @@
+(executable
+ (public_name linnet)
+ (name main)
+ (libraries linnet))
