@@ -40,10 +40,13 @@ module Token = struct
 
     (* Keywords *)
     | Let
+    | Fn
     | If
     | Else
     | For
-    | End
+    | Loop
+    | Match
+    | Return
 
     | EOF
 end
@@ -82,7 +85,7 @@ let is_whitespace c =
 let char_class_of = function
   | 'a' .. 'z' | 'A' .. 'Z'  -> CharClass.Ident
   | '0' .. '9'               -> CharClass.Digit
-  | '"' -> CharClass.Quote
+  | '"'                      -> CharClass.Quote
   | '+' | '-' | '*' | '/'    -> CharClass.Operator
   | ' ' | '\t' | '\r' | '\n' -> CharClass.WS
   | '\000'                   -> CharClass.EOF
@@ -139,10 +142,13 @@ let classify_operator op =
 let classify_keyword maybe_kw = 
   match maybe_kw with
   | "let" -> Token.Let
+  | "fn" -> Token.Fn
   | "if" -> Token.If
   | "else" -> Token.Else
   | "for" -> Token.For
-  | "end" -> Token.End
+  | "loop" -> Token.Loop
+  | "match" -> Token.Match
+  | "return" -> Token.Return
   | _ -> Token.Ident maybe_kw
 
 let tokenize input = 
@@ -187,9 +193,12 @@ let string_of_token = function
 
     (* Keywords *)
   | Token.Let -> "Let"
+  | Token.Fn -> "Fn"
   | Token.If -> "If"
   | Token.Else -> "Else"
   | Token.For -> "For"
-  | Token.End -> "End"
+  | Token.Loop -> "Loop"
+  | Token.Match -> "Match"
+  | Token.Return -> "Return"
 
   | Token.EOF -> "EOF"
