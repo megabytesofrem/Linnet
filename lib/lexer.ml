@@ -31,22 +31,36 @@ module Token = struct
     | Percent
     | Dot
     | Comma
+    | Colon
+    | Semi
+    | Arrow (* -> *)
+    | Bind  (* <- *)
+    | Backslash
     | LParen
     | RParen
     | LBrack
     | RBrack
     | LCurly
     | RCurly
+    | Eq
+    | EqEq
+    | NotEq
+    | Less
+    | LessEq
+    | Greater
+    | GreaterEq
 
     (* Keywords *)
     | Let
     | Fn
     | If
+    | Then
     | Else
     | For
     | Loop
     | Match
     | Return
+    | Pure
 
     | EOF
 end
@@ -77,19 +91,34 @@ let advance lex =
     if c <> None then lex.pos <- lex.pos + 1;
     c
 
-let is_whitespace c = 
-  match c with
+(* Helper functions for DFA *)
+let is_alpha = function
+  | 'a' .. 'z' | 'A' .. 'Z' -> true
+  | _ -> false
+
+let is_digit = function
+  | '0' .. '9' -> true
+  | _ -> false
+
+let is_ws = function
   | ' ' | '\t' | '\r' | '\n' -> true
   | _ -> false
 
+let is_operator_char = function
+  | '+' | '-' | '*' | '/' | '%' 
+  | '.' | ',' | '(' | ')' | '[' 
+  | ']' | '{' | '}' | '=' | '!' 
+  | '<' | '>' | ':' | ';' |  '\\' -> true
+  | _ -> false
+
 let char_class_of = function
-  | 'a' .. 'z' | 'A' .. 'Z'  -> CharClass.Ident
-  | '0' .. '9'               -> CharClass.Digit
-  | '"'                      -> CharClass.Quote
-  | '+' | '-' | '*' | '/'    -> CharClass.Operator
-  | ' ' | '\t' | '\r' | '\n' -> CharClass.WS
-  | '\000'                   -> CharClass.EOF
-  | _                        -> CharClass.Other
+  | c when is_alpha c -> CharClass.Ident
+  | c when is_digit c -> CharClass.Digit
+  | '"'               -> CharClass.Quote
+  | c when is_operator_char c -> CharClass.Operator
+  | c when is_ws c    -> CharClass.WS
+  | '\000'            -> CharClass.EOF
+  | _                 -> CharClass.Other
 
 (* DFA state transition function *)
 (*
@@ -105,6 +134,7 @@ let next_state dfa c_class =
   | (DFA.Start, CharClass.Ident) -> DFA.Letter
   | (DFA.Start, CharClass.Digit) -> DFA.Digit
   | (DFA.Start, CharClass.Operator) -> DFA.Operator
+  | (DFA.Operator, CharClass.Operator) -> DFA.Operator (* allow multi-char operators *)
   | (DFA.Letter, CharClass.Ident) | (DFA.Letter, CharClass.Digit) -> DFA.Letter
   | (DFA.Digit, CharClass.Digit) -> DFA.Digit
   | _ -> DFA.Error
@@ -137,13 +167,26 @@ let classify_operator op =
   | "]" -> Token.RBrack
   | "{" -> Token.LCurly
   | "}" -> Token.RCurly
-  | _ -> failwith "Unknown operator"
+  | ":" -> Token.Colon
+  | ";" -> Token.Semi
+  | "\\" -> Token.Backslash
+  | "->" -> Token.Arrow
+  | "<-" -> Token.Bind
+  | "=" -> Token.Eq
+  | "==" -> Token.EqEq
+  | "!=" -> Token.NotEq
+  | "<" -> Token.Less
+  | "<=" -> Token.LessEq
+  | ">" -> Token.Greater
+  | ">=" -> Token.GreaterEq
+  | _ -> failwith ("Unknown operator: " ^ op)
 
 let classify_keyword maybe_kw = 
   match maybe_kw with
   | "let" -> Token.Let
   | "fn" -> Token.Fn
   | "if" -> Token.If
+  | "then" -> Token.Then
   | "else" -> Token.Else
   | "for" -> Token.For
   | "loop" -> Token.Loop
@@ -156,7 +199,7 @@ let tokenize input =
   let rec loop acc = 
     match peek state with
     | None -> List.rev (Token.EOF :: acc) (* End of input token *)
-    | Some c when is_whitespace c -> 
+    | Some c when is_ws c -> 
       let _ = advance state in loop acc 
     | Some _ -> 
       let (final_state, lexeme) = consume_token state DFA.Start "" in
@@ -184,6 +227,11 @@ let string_of_token = function
   | Token.Percent -> "Percent"
   | Token.Dot -> "Dot"
   | Token.Comma -> "Comma"
+  | Token.Colon -> "Colon"
+  | Token.Semi -> "Semi"
+  | Token.Arrow -> "Arrow"
+  | Token.Bind -> "Bind"
+  | Token.Backslash -> "Backslash"
   | Token.LParen -> "LParen"
   | Token.RParen -> "RParen"
   | Token.LBrack -> "LBrack"
@@ -191,14 +239,25 @@ let string_of_token = function
   | Token.LCurly -> "LCurly"
   | Token.RCurly -> "RCurly"
 
+  | Token.Eq -> "Eq"
+  | Token.EqEq -> "EqEq"
+  | Token.NotEq -> "NotEq"
+  | Token.Less -> "Less"
+  | Token.LessEq -> "LessEq"
+  | Token.Greater -> "Greater"
+  | Token.GreaterEq -> "GreaterEq"
+
     (* Keywords *)
-  | Token.Let -> "Let"
-  | Token.Fn -> "Fn"
-  | Token.If -> "If"
-  | Token.Else -> "Else"
-  | Token.For -> "For"
-  | Token.Loop -> "Loop"
-  | Token.Match -> "Match"
-  | Token.Return -> "Return"
+  | Token.Let -> "let"
+  | Token.Fn -> "fn"
+  | Token.If -> "if"
+  | Token.Then -> "then"
+  | Token.Else -> "else"
+  | Token.For -> "for"
+  | Token.Loop -> "loop"
+  | Token.Match -> "match"
+  | Token.Return -> "return"
+  | Token.Pure -> "pure"
 
   | Token.EOF -> "EOF"
+  (* | _ -> "Unknown" *)

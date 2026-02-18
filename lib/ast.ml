@@ -1,20 +1,22 @@
-module T = Linnet.Lexer.Token
+module T = Lexer.Token
 
-type binary_op =
-  | Add
-  | Sub
-  | Mul
-  | Div
-  | Mod
-  | Equal
-  | NotEqual
-  | Less
-  | LessEqual
-  | Greater
-  | GreaterEqual
+module BinOp = struct
+  type t = 
+    | Add
+    | Sub
+    | Mul
+    | Div
+    | Mod
+    | Eq
+    | NotEq
+    | Less
+    | LessEq
+    | Greater
+    | GreaterEq
+end
 
 module Ty = struct
-  (* side-effect tracking *)
+  (* side-effect tracking, later on *)
   type effect_ty = IO | FS | Network | Random | UserEff of string
 
   type t = 
@@ -35,10 +37,12 @@ module Expr = struct
     | Literal of T.t
     | Ident of string
     | Unary of T.t * t
-    | Binary of binary_op * t * t
+    | Binary of BinOp.t * t * t
+    | App of t * t                     (* f x y *)
+    | Lam of string list * t          (* \x y -> ... *)
     | Let of string * Ty.t option * t (* optional type annotation *)
     | If of t * t * t option          (* condition, then, optional else *)
     | Loop of t option * t            (* loop *)
-    | MBlock of t list                (* monadic block: { .. } *)
-    | MBind of string * t             (* monadic bind: x <- m  *)
+    | Block of t list                 (* { e1; e2; e3 } *)
+    | Bind of string * t              (* let x <- m *)
 end
