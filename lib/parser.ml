@@ -277,7 +277,9 @@ let parse_type pstate : Ast.Ty.t parser_result =
       Error
         (Printf.sprintf "%d: Expected type but found end of input" pstate.pos)
 
-let parse_let pstate : Ast.Expr.t parser_result = 
+let rec parse_let pstate : Ast.Expr.t parser_result =
+  (* not sure if this should be let rec or not *)
+
   (* let ident: <type> = <expr> *)
   advance pstate |> ignore; (* consume 'let' *)
   let* id = expect_ident pstate in
@@ -291,9 +293,50 @@ let parse_let pstate : Ast.Expr.t parser_result =
   in
   let* _ = expect pstate T.Eq in (* consume '=' *)
   let* expr = parse_expr pstate in
+
+  (* check for in or where clause *)
+    match peek pstate with
+    | Some T.In ->
+        advance pstate |> ignore; (* consume 'in' *)
+        let* body = parse_expr pstate in
+        Ok (Ast.Expr.LetIn (id, ty_opt, expr, body))
+    | Some T.Where ->
+        advance pstate |> ignore; (* consume 'where' *)
+        let* clauses = parse_where_clauses pstate in
+        Ok (Ast.Expr.LetWhere (id, ty_opt, expr, clauses))
+    | _ ->
+
   Ok (Ast.Expr.Let (id, ty_opt, expr))
 
   [@@ocamlformat "disable"]
+
+and parse_where_clauses pstate : Ast.Clause.t list parser_result =
+  (* let result = expr where x = 10 *)
+  let parse_clause ps = 
+    advance ps |> ignore; (* consume 'where' *)
+    let* id = expect_ident ps in
+    let* ty_opt = 
+      match peek ps with
+      | Some T.Colon ->
+          advance ps |> ignore; (* consume ':' *)
+          let* ty = parse_type ps in
+          Ok (Some ty)
+      | _ -> Ok None
+    in
+    let* _ = expect ps T.Eq in (* consume '=' *)
+    let* expr = parse_expr ps in
+    Ok (Ast.Clause.Where (id, ty_opt, expr))
+  in
+
+  (* parse many where clauses *)
+  let rec loop acc =
+    match peek pstate with
+    | Some T.Where ->
+        let* clause = parse_clause pstate in
+        loop (clause :: acc)
+    | _ -> Ok (List.rev acc)
+  in
+  loop []
 
 let parse_if pstate : Ast.Expr.t parser_result =
   (* if cond then <then_branch> else <else_branch> *)

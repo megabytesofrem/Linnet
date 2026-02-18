@@ -30,6 +30,10 @@ let syntax_cases =
       [T.If; T.Ident "x"; T.Greater; T.Number 0; T.Then; T.Ident "x"; T.Else; T.Minus; T.Ident "x"; T.EOF]);
     ("\\x y -> x + y", [T.Backslash; T.Ident "x"; T.Ident "y"; T.Arrow; T.Ident "x"; T.Plus; T.Ident "y"; T.EOF]);
 
+    (* let .. in and where *)
+    ("let x = 10 in x + 5", [T.Let; T.Ident "x"; T.Eq; T.Number 10; T.In; T.Ident "x"; T.Plus; T.Number 5; T.EOF]);
+    ("let x = 10 where y = 20", [T.Let; T.Ident "x"; T.Eq; T.Number 10; T.Where; T.Ident "y"; T.Eq; T.Number 20; T.EOF]);
+
     (* lists, tuples, unit *)
     ("[1, 2, 3]",   [T.LBrack; T.Number 1; T.Comma; T.Number 2; T.Comma; T.Number 3; T.RBrack; T.EOF]);
     ("(\"a\", \"b\")", [T.LParen; T.String "a"; T.Comma; T.String "b"; T.RParen; T.EOF]);

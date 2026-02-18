@@ -50,6 +50,8 @@ module Token = struct
     
     (* Keywords *)
     | Let
+    | In
+    | Where
     | Fn
     | If
     | Then
@@ -155,8 +157,7 @@ let next_state dfa c_class =
   | DFA.Letter, CharClass.Digit ->
       DFA.Letter
   | DFA.Digit, CharClass.Digit -> DFA.Digit
-
-  (**)
+  (* *)
   (* string *)
   | DFA.Start, CharClass.Quote -> DFA.String (* start of string literal *)
   | DFA.String, CharClass.Quote -> DFA.Start (* end of string literal *)
@@ -229,6 +230,8 @@ let classify_operator op =
 let classify_keyword maybe_kw =
   match maybe_kw with
   | "let" -> Token.Let
+  | "in" -> Token.In
+  | "where" -> Token.Where
   | "fn" -> Token.Fn
   | "if" -> Token.If
   | "then" -> Token.Then
@@ -321,6 +324,8 @@ let string_of_token = function
   | Token.Greater -> "Greater"
   | Token.GreaterEq -> "GreaterEq" (* Keywords *)
   | Token.Let -> "let"
+  | Token.In -> "in"
+  | Token.Where -> "where"
   | Token.Fn -> "fn"
   | Token.If -> "if"
   | Token.Then -> "then"

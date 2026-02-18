@@ -45,20 +45,30 @@ module Ty = struct
     [@@ocamlformat "disable"]
 end
 
-module Expr = struct
+module rec Expr : sig
   type t =
     | Unit (* () *)
     | Literal of T.t
     | Ident of string
     | Unary of T.t * t
     | Binary of BinOp.t * t * t
-    | List of t list (* [e1, e2, e3] *)
+    | List of t list  (* [e1, e2, e3] *)
     | Tuple of t list (* (e1, e2, e3) *)
-    | App of t * t (* f x y *)
+    | App of t * t    (* f x y *)
     | Lam of string list * t (* \x y -> ... *)
     | Let of string * Ty.t option * t (* optional type annotation *)
-    | If of t * t * t option (* condition, then, optional else *)
-    | Loop of t option * t (* loop (condition) body *)
-    | Block of t list (* { e1; e2; e3 } *)
-    | Bind of string * t (* let x <- m *)
-end
+    | LetIn of string * Ty.t option * t * t (* let x = expr in body *)
+    | LetWhere of string * Ty.t option * t * Clause.t list (* let x = expr where ... *)
+    | If of t * t * t option (* if cond then expr else expr  *)
+    | Loop of t option * t   (* loop (condition) body *)
+    | Block of t list        (* { e1; e2; e3 } *)
+    | Bind of string * t     (* let x <- m *)
+
+    [@@ocamlformat "disable"]
+end =
+  Expr
+
+and Clause : sig
+  type t = Where of string * Ty.t option * Expr.t
+end =
+  Clause
