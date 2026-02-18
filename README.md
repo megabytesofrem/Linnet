@@ -1,42 +1,43 @@
 # linnet
-Small language, designed as a hybrid of Rust and ML.
+Small purely functional language inspired by Rust and Haskell
 
 ## Features
-- Immutability by default
+- Pure immutability
 - Implicitly monadic control flow via blocks (`{ }`)
-- Zero `try/catch`
+- Zero `try/catch`, monadic error types are used instead
 
 ## Syntax
 
 ```rs
-fn add (first:int second:int) = first + second
+// most general type will be inferred
+// add : Numeric a => a -> a -> a
+fn add first second = first + second
+
+// pointfree functions
+fn add_pf = (+)
 
 fn main () = {
-    let result: int = add 1 2
+    let result: Int = add 1 2
     print result
     return result
 }
 ```
 
 ```rs
-
 fn main () = {
     let shape = Circle(15.0)
+
+    // Rust/Haskell style pattern matching
     let describe = match shape {
-        Circle(radius) => "Radius: " ++ radius 
-        Square(x, y)   => "Size: " ++ x ++ "*" ++ y
+        Circle(radius) -> "Radius: " ++ radius 
+        Square(x, y)   -> "Size: " ++ x ++ "*" ++ y
     }
 }
-
 ```
 
 ## Type system
 Side-effects (IO, launching a missile etc.) are represented via a special `Eff` type. Side-effectful control flow is handled
-using a specialization of monadic IO and monadic result types, and Linnet provides a few syntax features to handle monadic flow.
+using a specialization of monadic IO and monadic result types.
 
-The type system encodes side-effects, more akin to a simplification of Algebraic Effects.
-
-- Side effect encoding: `fn maybe_launch_missile () -> Eff Unit (IO + FS)`
-- Monadic binding: `let result <- World.maybe_launch_missile`
-- Monadic sequencing: `result >>= print`, `log >> throw >> close`
-- Monadic blocks: `{ let result = World.maybe_launch missile; log result; close result }`
+> [!WARNING]
+> `Eff a` currently translates to `IO a` from Haskell, but a proper effect system is planned later.
