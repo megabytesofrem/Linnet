@@ -37,7 +37,7 @@ let syntax_cases =
     (* lists, tuples, unit *)
     ("[1, 2, 3]",   [T.LBrack; T.Number 1; T.Comma; T.Number 2; T.Comma; T.Number 3; T.RBrack; T.EOF]);
     ("(\"a\", \"b\")", [T.LParen; T.String "a"; T.Comma; T.String "b"; T.RParen; T.EOF]);
-    ("()",          [T.LParen; T.RParen; T.EOF]);
+    ("()",          [T.Unit; T.EOF]);
 
     (* function application *)
     ("f x y",       [T.Ident "f"; T.Ident "x"; T.Ident "y"; T.EOF]);

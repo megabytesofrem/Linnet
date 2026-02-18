@@ -23,6 +23,7 @@ module Token = struct
     | Colon
     | Semi
     | Quote
+    | DQuote
     | Arrow     (* -> *)
     | LArrow    (* <- *)
     | Backslash (* \ *)
@@ -59,7 +60,6 @@ module Token = struct
     | For
     | Loop
     | Match
-    | Return
     | EOF
 
     [@@ocamlformat "disable"]
@@ -110,12 +110,6 @@ let is_operator_char = function
   | '$'
   | '.'
   | ','
-  | '('
-  | ')'
-  | '['
-  | ']'
-  | '{'
-  | '}'
   | '='
   | '!'
   | '&'
@@ -131,6 +125,7 @@ let is_operator_char = function
 let char_class_of = function
   | c when is_alpha c -> CharClass.Ident
   | c when is_digit c -> CharClass.Digit
+  | '\'' -> CharClass.Ident (* allow ' in identifiers, e.g. a' *)
   | '"' -> CharClass.Quote
   | c when is_operator_char c -> CharClass.Operator
   | c when is_ws c -> CharClass.WS
@@ -151,18 +146,21 @@ let next_state dfa c_class =
   | DFA.Start, CharClass.Ident -> DFA.Letter
   | DFA.Start, CharClass.Digit -> DFA.Digit
   | DFA.Start, CharClass.Operator -> DFA.Operator
-  | DFA.Operator, CharClass.Operator ->
-      DFA.Operator (* allow multi-char operators *)
+
+  (* allow multi-char operators *)
+  | DFA.Operator, CharClass.Operator -> DFA.Operator
+
   | DFA.Letter, CharClass.Ident
-  | DFA.Letter, CharClass.Digit ->
-      DFA.Letter
+  | DFA.Letter, CharClass.Digit -> DFA.Letter
   | DFA.Digit, CharClass.Digit -> DFA.Digit
-  (* *)
+
   (* string *)
   | DFA.Start, CharClass.Quote -> DFA.String (* start of string literal *)
   | DFA.String, CharClass.Quote -> DFA.Start (* end of string literal *)
   | DFA.String, _ -> DFA.String (* inside string literal *)
   | _ -> DFA.Error
+
+  [@@ocamlformat "disable"]
 
 let rec consume_token lex dfa_state lexeme =
   match peek lex with
@@ -239,7 +237,6 @@ let classify_keyword maybe_kw =
   | "for" -> Token.For
   | "loop" -> Token.Loop
   | "match" -> Token.Match
-  | "return" -> Token.Return
   | _ -> Token.Ident maybe_kw
 
 let tokenize input =
@@ -252,7 +249,7 @@ let tokenize input =
         loop acc
     (* Handle the unit case *)
     | Some '(' -> (
-        match peek state with
+        match peek_next state with
         | Some ')' ->
             advance state |> ignore;
             (* consume '(' *)
@@ -263,6 +260,22 @@ let tokenize input =
             (* regular lparen *)
             advance state |> ignore;
             loop (Token.LParen :: acc))
+    (* Handle delimiters individually *)
+    | Some ')' ->
+        advance state |> ignore;
+        loop (Token.RParen :: acc)
+    | Some '[' ->
+        advance state |> ignore;
+        loop (Token.LBrack :: acc)
+    | Some ']' ->
+        advance state |> ignore;
+        loop (Token.RBrack :: acc)
+    | Some '{' ->
+        advance state |> ignore;
+        loop (Token.LCurly :: acc)
+    | Some '}' ->
+        advance state |> ignore;
+        loop (Token.RCurly :: acc)
     (* Handle operators and keywords *)
     | Some _ ->
         let final_state, lexeme = consume_token state DFA.Start "" in
@@ -297,6 +310,7 @@ let string_of_token = function
   | Token.Colon -> "Colon"
   | Token.Semi -> "Semi"
   | Token.Quote -> "Quote"
+  | Token.DQuote -> "DQuote"
   | Token.Arrow -> "Arrow"
   | Token.LArrow -> "Bind"
   | Token.Backslash -> "Backslash"
@@ -333,7 +347,6 @@ let string_of_token = function
   | Token.For -> "for"
   | Token.Loop -> "loop"
   | Token.Match -> "match"
-  | Token.Return -> "return"
   | Token.EOF -> "EOF"
 
   [@@ocamlformat "disable"]

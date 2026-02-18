@@ -137,6 +137,41 @@ let can_start_arg = function
 
 (* Parse a single atomic expression *)
 let rec parse_atom pstate : Ast.Expr.t parser_result =
+  let parse_group_like ps =
+    (* lookahead to check for unit (), tuple, or grouped expression *)
+    let saved_pos = ps.pos in
+    advance ps |> ignore;
+    match peek ps with
+    | Some T.RParen ->
+        (* unit: () *)
+        advance ps |> ignore;
+        Ok Ast.Expr.Unit
+    | Some _ -> (
+        (* parse first element *)
+        let* first = parse_expr_bp ps 0 in
+        match peek ps with
+        | Some T.Comma ->
+            (* tuple: (e1, e2, ...) *)
+            ps.pos <- saved_pos;
+            (* reset position *)
+            parse_tuple ps
+        | Some T.RParen ->
+            (* grouped expression: (e) *)
+            advance ps |> ignore;
+            Ok first
+        | Some token ->
+            Error
+              (Printf.sprintf "%d: Expected ',' or ')' but found %s" ps.pos
+                 (Lexer.string_of_token token))
+        | None ->
+            Error
+              (Printf.sprintf "%d: Expected ')' but found end of input" ps.pos))
+    | None ->
+        Error
+          (Printf.sprintf
+             "%d: Expected expression or ')' but found end of input" ps.pos)
+  in
+
   match peek pstate with
   | Some (T.Number _ as token) ->
       advance pstate |> ignore;
@@ -147,42 +182,16 @@ let rec parse_atom pstate : Ast.Expr.t parser_result =
   | Some (T.Ident id) ->
       advance pstate |> ignore;
       Ok (Ast.Expr.Ident id)
-  | Some T.LParen -> (
-      (* lookahead to check for unit (), tuple, or grouped expression *)
-      let saved_pos = pstate.pos in
-      advance pstate |> ignore;
-      match peek pstate with
-      | Some T.RParen ->
-          (* unit: () *)
-          advance pstate |> ignore;
-          Ok Ast.Expr.Unit
-      | Some _ -> (
-          (* parse first element *)
-          let* first = parse_expr_bp pstate 0 in
-          match peek pstate with
-          | Some T.Comma ->
-              (* tuple: (e1, e2, ...) *)
-              pstate.pos <- saved_pos;
-              (* reset position *)
-              parse_tuple pstate
-          | Some T.RParen ->
-              (* grouped expression: (e) *)
-              advance pstate |> ignore;
-              Ok first
-          | Some token ->
-              Error
-                (Printf.sprintf "%d: Expected ',' or ')' but found %s"
-                   pstate.pos
-                   (Lexer.string_of_token token))
-          | None ->
-              Error
-                (Printf.sprintf "%d: Expected ')' but found end of input"
-                   pstate.pos))
-      | None ->
-          Error
-            (Printf.sprintf
-               "%d: Expected expression or ')' but found end of input"
-               pstate.pos))
+  (* keywords *)
+  | Some T.Let -> parse_let pstate
+  | Some T.If -> parse_if pstate
+  | Some T.Loop -> parse_loop pstate
+  (* special cases *)
+  | Some T.Backslash -> parse_lam pstate
+  | Some T.LBrack -> parse_list pstate
+  | Some T.LCurly -> parse_block pstate
+  | Some T.LParen -> parse_group_like pstate
+  (* end special cases *)
   | Some token ->
       Error
         (Printf.sprintf "%d: Unexpected token %s" pstate.pos
@@ -267,7 +276,7 @@ and parse_tuple pstate : Ast.Expr.t parser_result =
       | [ e ] -> e (* single element tuple is just the element *)
       | _ -> Ast.Expr.Tuple es)
 
-let parse_type pstate : Ast.Ty.t parser_result =
+and parse_type pstate : Ast.Ty.t parser_result =
   match peek pstate with
   | Some ty_token ->
       let* ty = classify_type pstate ty_token in
@@ -277,7 +286,7 @@ let parse_type pstate : Ast.Ty.t parser_result =
       Error
         (Printf.sprintf "%d: Expected type but found end of input" pstate.pos)
 
-let rec parse_let pstate : Ast.Expr.t parser_result =
+and parse_let pstate : Ast.Expr.t parser_result =
   (* not sure if this should be let rec or not *)
 
   (* let ident: <type> = <expr> *)
@@ -338,7 +347,7 @@ and parse_where_clauses pstate : Ast.Clause.t list parser_result =
   in
   loop []
 
-let parse_if pstate : Ast.Expr.t parser_result =
+and parse_if pstate : Ast.Expr.t parser_result =
   (* if cond then <then_branch> else <else_branch> *)
   advance pstate |> ignore; (* consume if *)
   let* cond = parse_expr pstate in
@@ -350,7 +359,7 @@ let parse_if pstate : Ast.Expr.t parser_result =
 
   [@@ocamlformat "disable"]
 
-let parse_lam pstate : Ast.Expr.t parser_result =
+and parse_lam pstate : Ast.Expr.t parser_result =
   (* \x y -> body *)
   advance pstate |> ignore; (* consume '\' *)
 
@@ -376,7 +385,7 @@ let parse_lam pstate : Ast.Expr.t parser_result =
 
   [@@ocamlformat "disable"]
 
-let parse_loop pstate : Ast.Expr.t parser_result =
+and parse_loop pstate : Ast.Expr.t parser_result =
   (* loop (<optional condition>) body *)
   advance pstate |> ignore; (* consume 'loop' *)
   let* cond_opt = 
@@ -393,14 +402,14 @@ let parse_loop pstate : Ast.Expr.t parser_result =
 
   [@@ocamlformat "disable"]
 
-let parse_block pstate : Ast.Expr.t parser_result =
+and parse_block pstate : Ast.Expr.t parser_result =
   (* monadic block: { e1; e2; e3 } *)
   advance pstate |> ignore; (* consume '{' *)
   failwith "parse_block not implemented yet"
 
   [@@ocamlformat "disable"]
 
-let parse_bind pstate : Ast.Expr.t parser_result =
+and parse_bind pstate : Ast.Expr.t parser_result =
   (* let x <- m *)
   advance pstate |> ignore; (* consume 'let' *)
   let* id = expect_ident pstate in
