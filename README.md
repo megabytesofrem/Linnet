@@ -13,18 +13,30 @@ Small purely functional language inspired by Rust and Haskell
 // add : Numeric a => a -> a -> a
 fn add first second = first + second
 
-// pointfree functions
-fn add_pf = (+)
+// complex calculation using let .. in
+fn calc_complex = 
+    let first_part = 5 in 
+    let next_part  = 10 in 
+    let final_part = 5 in 
+    first_part + next_part - final_part
 
-fn main () = {
+// complex calculation using 'where'
+fn calc_complex_2 = result
+    where
+      let first_part = 5
+      let next_part  = 10
+      let final_part = 5
+      let result = first_part + next_part - final_part
+
+fn main () -> Eff Unit = {
     let result: Int = add 1 2
     print result
-    return result
+    pure result
 }
 ```
 
 ```rs
-fn main () = {
+fn main () -> Eff Unit = {
     let shape = Circle(15.0)
 
     // Rust/Haskell style pattern matching
