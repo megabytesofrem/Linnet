@@ -1,29 +1,18 @@
 (* Internal DFA state *)
 module DFA = struct
-  type t = 
-    | Start
-    | Letter
-    | Digit
-    | Operator
-    | Error
+  type t = Start | Letter | Digit | String | Operator | Error
 end
 
 module CharClass = struct
-  type t = 
-    | Ident
-    | Digit
-    | Quote
-    | Operator
-    | WS
-    | EOF
-    | Other
+  type t = Ident | Digit | Quote | Operator | WS | EOF | Other
 end
 
 module Token = struct
-  type t = 
+  type t =
     | Ident of string
     | Number of int
     | String of string
+    | Unit
     | Plus
     | Minus
     | Star
@@ -33,6 +22,7 @@ module Token = struct
     | Comma
     | Colon
     | Semi
+    | Quote
     | Arrow     (* -> *)
     | LArrow    (* <- *)
     | Backslash (* \ *)
@@ -52,12 +42,12 @@ module Token = struct
     | GreaterEq
 
     (* Monadic/applicative/alternative *)
-    | Bind  (* >>= *)
-    | Pipe  (* >>  *)
-    | UFO   (* <*> *)
-    | Map   (* <$> *)
-    | Alt   (* <|> *)
-
+    | Bind      (* >>= *)
+    | Pipe      (* >>  *)
+    | UFO       (* <*> *)
+    | Map       (* <$> *)
+    | Alt       (* <|> *)
+    
     (* Keywords *)
     | Let
     | Fn
@@ -68,39 +58,33 @@ module Token = struct
     | Loop
     | Match
     | Return
-
     | EOF
+
+    [@@ocamlformat "disable"]
 end
 
 (* Imperative core, functional shell *)
-type lex_state = {
-  input: string;
-  mutable pos: int;
-  length: int;
-}
+type lex_state = { input : string; mutable pos : int; length : int }
 
-let create_lex_state s = {
-  input = s;
-  pos = 0;
-  length = String.length s;
-}
+let create_lex_state s = { input = s; pos = 0; length = String.length s }
 
-let peek lex = 
-  if lex.pos >= lex.length then None
-  else Some (String.get lex.input lex.pos)
+let peek lex =
+  if lex.pos >= lex.length then None else Some (String.get lex.input lex.pos)
 
-let peek_next lex = 
+let peek_next lex =
   if lex.pos + 1 >= lex.length then None
   else Some (String.get lex.input (lex.pos + 1))
-    
-let advance lex = 
+
+let advance lex =
   let c = peek lex in
-    if c <> None then lex.pos <- lex.pos + 1;
-    c
+  if c <> None then lex.pos <- lex.pos + 1;
+  c
 
 (* Helper functions for DFA *)
 let is_alpha = function
-  | 'a' .. 'z' | 'A' .. 'Z' -> true
+  | 'a' .. 'z'
+  | 'A' .. 'Z' ->
+      true
   | _ -> false
 
 let is_digit = function
@@ -108,24 +92,48 @@ let is_digit = function
   | _ -> false
 
 let is_ws = function
-  | ' ' | '\t' | '\r' | '\n' -> true
+  | ' '
+  | '\t'
+  | '\r'
+  | '\n' ->
+      true
   | _ -> false
 
 let is_operator_char = function
-  | '+' | '-' | '*' | '/' | '%' | '$' 
-  | '.' | ',' | '(' | ')' | '[' | ']' 
-  | '{' | '}' | '=' | '!' | '&' | '|'
-  | '<' | '>' | ':' | ';' | '\\' -> true
+  | '+'
+  | '-'
+  | '*'
+  | '/'
+  | '%'
+  | '$'
+  | '.'
+  | ','
+  | '('
+  | ')'
+  | '['
+  | ']'
+  | '{'
+  | '}'
+  | '='
+  | '!'
+  | '&'
+  | '|'
+  | '<'
+  | '>'
+  | ':'
+  | ';'
+  | '\\' ->
+      true
   | _ -> false
 
 let char_class_of = function
   | c when is_alpha c -> CharClass.Ident
   | c when is_digit c -> CharClass.Digit
-  | '"'               -> CharClass.Quote
+  | '"' -> CharClass.Quote
   | c when is_operator_char c -> CharClass.Operator
-  | c when is_ws c    -> CharClass.WS
-  | '\000'            -> CharClass.EOF
-  | _                 -> CharClass.Other
+  | c when is_ws c -> CharClass.WS
+  | '\000' -> CharClass.EOF
+  | _ -> CharClass.Other
 
 (* DFA state transition function *)
 (*
@@ -135,31 +143,49 @@ let char_class_of = function
     q0 is the start state (DFA.Start)
 *)
 
-let next_state dfa c_class = 
+let next_state dfa c_class =
   match (dfa, c_class) with
   (* transition to an accepting state based on the transition function *)
-  | (DFA.Start, CharClass.Ident) -> DFA.Letter
-  | (DFA.Start, CharClass.Digit) -> DFA.Digit
-  | (DFA.Start, CharClass.Operator) -> DFA.Operator
-  | (DFA.Operator, CharClass.Operator) -> DFA.Operator (* allow multi-char operators *)
-  | (DFA.Letter, CharClass.Ident) | (DFA.Letter, CharClass.Digit) -> DFA.Letter
-  | (DFA.Digit, CharClass.Digit) -> DFA.Digit
+  | DFA.Start, CharClass.Ident -> DFA.Letter
+  | DFA.Start, CharClass.Digit -> DFA.Digit
+  | DFA.Start, CharClass.Operator -> DFA.Operator
+  | DFA.Operator, CharClass.Operator ->
+      DFA.Operator (* allow multi-char operators *)
+  | DFA.Letter, CharClass.Ident
+  | DFA.Letter, CharClass.Digit ->
+      DFA.Letter
+  | DFA.Digit, CharClass.Digit -> DFA.Digit
+
+  (**)
+  (* string *)
+  | DFA.Start, CharClass.Quote -> DFA.String (* start of string literal *)
+  | DFA.String, CharClass.Quote -> DFA.Start (* end of string literal *)
+  | DFA.String, _ -> DFA.String (* inside string literal *)
   | _ -> DFA.Error
 
-let rec consume_token lex dfa_state lexeme = 
+let rec consume_token lex dfa_state lexeme =
   match peek lex with
-  | None -> (dfa_state, lexeme) (* End of input, return current state *)
-  | Some c -> 
+  | None -> (dfa_state, lexeme) (* end of input, return current state *)
+  | Some c -> (
       let c_class = char_class_of c in
-      let next_DFA = next_state dfa_state c_class in
-      match next_DFA with
-      | DFA.Error -> (dfa_state, lexeme) (* Invalid transition, return current token *)
+      let next_dfa = next_state dfa_state c_class in
+      match next_dfa with
+      | DFA.Error ->
+          (dfa_state, lexeme) (* invalid transition, return current token *)
+      | DFA.Start when dfa_state = DFA.String ->
+          (* end of string literal, consume the closing quote *)
+          let _ = advance lex in
+          (next_dfa, lexeme)
+      | DFA.String when dfa_state = DFA.Start ->
+          (* start of string literal, consume the opening quote *)
+          let _ = advance lex in
+          consume_token lex next_dfa lexeme
       | _ ->
-        (* accept the character and continue consuming *)
-        let _ = advance lex in
-        consume_token lex next_DFA (lexeme ^ String.make 1 c)
+          (* accept the character and continue consuming *)
+          let _ = advance lex in
+          consume_token lex next_dfa (lexeme ^ String.make 1 c))
 
-let classify_operator op = 
+let classify_operator op =
   match op with
   | "+" -> Token.Plus
   | "-" -> Token.Minus
@@ -187,7 +213,7 @@ let classify_operator op =
   | "<*>" -> Token.UFO
   | "<$>" -> Token.Map
   | "<|>" -> Token.Alt
-
+  
   (* Equality *)
   | "=" -> Token.Eq
   | "==" -> Token.EqEq
@@ -198,7 +224,9 @@ let classify_operator op =
   | ">=" -> Token.GreaterEq
   | _ -> failwith ("Unknown operator: " ^ op)
 
-let classify_keyword maybe_kw = 
+  [@@ocamlformat "disable"]
+
+let classify_keyword maybe_kw =
   match maybe_kw with
   | "let" -> Token.Let
   | "fn" -> Token.Fn
@@ -211,32 +239,51 @@ let classify_keyword maybe_kw =
   | "return" -> Token.Return
   | _ -> Token.Ident maybe_kw
 
-let tokenize input = 
+let tokenize input =
   let state = create_lex_state input in
-  let rec loop acc = 
+  let rec loop acc =
     match peek state with
     | None -> List.rev (Token.EOF :: acc) (* End of input token *)
-    | Some c when is_ws c -> 
-      let _ = advance state in loop acc 
-    | Some _ -> 
-      let (final_state, lexeme) = consume_token state DFA.Start "" in
+    | Some c when is_ws c ->
+        let _ = advance state in
+        loop acc
+    (* Handle the unit case *)
+    | Some '(' -> (
+        match peek state with
+        | Some ')' ->
+            advance state |> ignore;
+            (* consume '(' *)
+            advance state |> ignore;
+            (* consume ')' *)
+            loop (Token.Unit :: acc)
+        | _ ->
+            (* regular lparen *)
+            advance state |> ignore;
+            loop (Token.LParen :: acc))
+    (* Handle operators and keywords *)
+    | Some _ ->
+        let final_state, lexeme = consume_token state DFA.Start "" in
 
-      (* Map DFA state to token type *)
-      let t_type = match final_state with
-        | DFA.Letter -> classify_keyword lexeme
-        | DFA.Digit ->  Token.Number (int_of_string lexeme)
-        | DFA.Operator -> classify_operator lexeme
-        | _ -> failwith ("Unexpected token: " ^ lexeme)
-      in
-      loop (t_type :: acc)
+        (* Map DFA state to token type *)
+        let t_type =
+          match final_state with
+          | DFA.Letter -> classify_keyword lexeme
+          | DFA.Digit -> Token.Number (int_of_string lexeme)
+          | DFA.Start -> Token.String lexeme (* Completed string literal *)
+          | DFA.String -> failwith "Unterminated string literal"
+          | DFA.Operator -> classify_operator lexeme
+          | DFA.Error -> failwith ("Unexpected token: " ^ lexeme)
+        in
+        loop (t_type :: acc)
   in
   loop []
 
 (* Testing *)
-let string_of_token = function 
+let string_of_token = function
   | Token.Ident s -> "Ident(" ^ s ^ ")"
   | Token.Number n -> "Number(" ^ string_of_int n ^ ")"
   | Token.String s -> "String(" ^ s ^ ")"
+  | Token.Unit -> "Unit"
   | Token.Plus -> "Plus"
   | Token.Minus -> "Minus"
   | Token.Star -> "Star"
@@ -246,6 +293,7 @@ let string_of_token = function
   | Token.Comma -> "Comma"
   | Token.Colon -> "Colon"
   | Token.Semi -> "Semi"
+  | Token.Quote -> "Quote"
   | Token.Arrow -> "Arrow"
   | Token.LArrow -> "Bind"
   | Token.Backslash -> "Backslash"
@@ -265,16 +313,13 @@ let string_of_token = function
   | Token.Alt -> "Alt"
 
   (* Equality *)
-
   | Token.Eq -> "Eq"
   | Token.EqEq -> "EqEq"
   | Token.NotEq -> "NotEq"
   | Token.Less -> "Less"
   | Token.LessEq -> "LessEq"
   | Token.Greater -> "Greater"
-  | Token.GreaterEq -> "GreaterEq"
-
-    (* Keywords *)
+  | Token.GreaterEq -> "GreaterEq" (* Keywords *)
   | Token.Let -> "let"
   | Token.Fn -> "fn"
   | Token.If -> "if"
@@ -285,4 +330,5 @@ let string_of_token = function
   | Token.Match -> "match"
   | Token.Return -> "return"
   | Token.EOF -> "EOF"
-  (* | _ -> "Unknown" *)
+
+  [@@ocamlformat "disable"]

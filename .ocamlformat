@@ -1,0 +1,7 @@
+profile=default
+margin=80
+break-cases=all
+indicate-nested-or-patterns=unsafe-no
+
+let-and=sparse
+parse-docstrings=true
