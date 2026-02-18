@@ -15,6 +15,13 @@ module BinOp = struct
     | GreaterEq
     | Apply   (* application: f x or f $ x *)
     | Compose (* composition: f . g *)
+
+    (* Monadic/applicative/alternative *)
+    | Bind  (* >>= *)
+    | Pipe  (* >>  *)
+    | UFO   (* <*> *)
+    | Map   (* <$> *)
+    | Alt   (* <|> *)
 end
 
 module Ty = struct
@@ -44,7 +51,7 @@ module Expr = struct
     | Lam of string list * t          (* \x y -> ... *)
     | Let of string * Ty.t option * t (* optional type annotation *)
     | If of t * t * t option          (* condition, then, optional else *)
-    | Loop of t option * t            (* loop *)
+    | Loop of t option * t            (* loop (condition) body *)
     | Block of t list                 (* { e1; e2; e3 } *)
     | Bind of string * t              (* let x <- m *)
 end

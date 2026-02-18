@@ -14,6 +14,8 @@ let test_case_generator (input, expected) =
     Alcotest.(check (list token_testable)) "tokens match" expected actual
   )
 
+(* Test cases *)
+
 let binary_cases = [
   ("1 + 2",       [T.Number 1; T.Plus; T.Number 2; T.EOF]);
   ("1 + 2 * 3",   [T.Number 1; T.Plus; T.Number 2; T.Star; T.Number 3; T.EOF]);
@@ -38,19 +40,31 @@ let syntax_cases = [
   (* function composition *)
   ("f . g . h",   [T.Ident "f"; T.Dot; T.Ident "g"; T.Dot; T.Ident "h"; T.EOF]);
 
+  (* mixed *)
+  ("f . g $ x <|> y",   [T.Ident "f"; T.Dot; T.Ident "g"; T.Dollar; T.Ident "x"; T.Alt; T.Ident "y"; T.EOF]);
+
+  (* monadic/applicative/alternative *)
+  ("m >>= f",     [T.Ident "m"; T.Bind; T.Ident "f"; T.EOF]);
+  ("m >> f",      [T.Ident "m"; T.Pipe; T.Ident "f"; T.EOF]);
+  ("f <*> x",     [T.Ident "f"; T.UFO; T.Ident "x"; T.EOF]);
+  ("f <$> x",     [T.Ident "f"; T.Map; T.Ident "x"; T.EOF]);
+  ("m <|> n",     [T.Ident "m"; T.Alt; T.Ident "n"; T.EOF]);
+
   (* block *)
   ("{ x; y; z }", [T.LCurly; T.Ident "x"; T.Semi; T.Ident "y"; T.Semi; T.Ident "z"; T.RCurly; T.EOF]);
 
   (* bind *)
-  ("let x <- m", [T.Let; T.Ident "x"; T.Bind; T.Ident "m"; T.EOF]);
+  ("let x <- m", [T.Let; T.Ident "x"; T.LArrow; T.Ident "m"; T.EOF]);
 ]
 
-let suite = 
-  let cases = binary_cases @ unary_cases @ syntax_cases in
-  List.map test_case_generator cases
+let binary_suite = List.map test_case_generator binary_cases
+let unary_suite = List.map test_case_generator unary_cases
+let syntax_suite = List.map test_case_generator syntax_cases
 
 (* Test suite runner *)
 let () =
   Alcotest.run "Lexer Tests" [
-    ("Token Tests", suite);
+    ("Binary", binary_suite);
+    ("Unary", unary_suite);
+    ("Syntax", syntax_suite);
   ]

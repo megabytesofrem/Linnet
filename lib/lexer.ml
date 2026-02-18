@@ -34,7 +34,7 @@ module Token = struct
     | Colon
     | Semi
     | Arrow     (* -> *)
-    | Bind      (* <- *)
+    | LArrow    (* <- *)
     | Backslash (* \ *)
     | Dollar    (* $ *)
     | LParen
@@ -50,6 +50,13 @@ module Token = struct
     | LessEq
     | Greater
     | GreaterEq
+
+    (* Monadic/applicative/alternative *)
+    | Bind  (* >>= *)
+    | Pipe  (* >>  *)
+    | UFO   (* <*> *)
+    | Map   (* <$> *)
+    | Alt   (* <|> *)
 
     (* Keywords *)
     | Let
@@ -106,8 +113,8 @@ let is_ws = function
 
 let is_operator_char = function
   | '+' | '-' | '*' | '/' | '%' | '$' 
-  | '.' | ',' | '(' | ')' | '[' 
-  | ']' | '{' | '}' | '=' | '!' 
+  | '.' | ',' | '(' | ')' | '[' | ']' 
+  | '{' | '}' | '=' | '!' | '&' | '|'
   | '<' | '>' | ':' | ';' | '\\' -> true
   | _ -> false
 
@@ -172,7 +179,16 @@ let classify_operator op =
   | "\\" -> Token.Backslash
   | "$" -> Token.Dollar
   | "->" -> Token.Arrow
-  | "<-" -> Token.Bind
+  | "<-" -> Token.LArrow
+
+  (* Monadic/applicative/alternative *)
+  | ">>=" -> Token.Bind
+  | ">>" -> Token.Pipe
+  | "<*>" -> Token.UFO
+  | "<$>" -> Token.Map
+  | "<|>" -> Token.Alt
+
+  (* Equality *)
   | "=" -> Token.Eq
   | "==" -> Token.EqEq
   | "!=" -> Token.NotEq
@@ -231,7 +247,7 @@ let string_of_token = function
   | Token.Colon -> "Colon"
   | Token.Semi -> "Semi"
   | Token.Arrow -> "Arrow"
-  | Token.Bind -> "Bind"
+  | Token.LArrow -> "Bind"
   | Token.Backslash -> "Backslash"
   | Token.Dollar -> "Dollar"
   | Token.LParen -> "LParen"
@@ -240,6 +256,15 @@ let string_of_token = function
   | Token.RBrack -> "RBrack"
   | Token.LCurly -> "LCurly"
   | Token.RCurly -> "RCurly"
+
+  (* Monadic/applicative/alternative *)
+  | Token.Bind -> "Bind"
+  | Token.Pipe -> "Pipe"
+  | Token.UFO -> "Apply"
+  | Token.Map -> "Map"
+  | Token.Alt -> "Alt"
+
+  (* Equality *)
 
   | Token.Eq -> "Eq"
   | Token.EqEq -> "EqEq"

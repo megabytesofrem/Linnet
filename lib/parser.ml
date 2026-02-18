@@ -85,6 +85,13 @@ let infix_bp = function
   (* Non-associative *)
   | T.Eq | T.NotEq | T.Less | T.LessEq | T.Greater | T.GreaterEq -> (5, 5)
 
+  (* Monadic operators, right assoc, lower precedence *)
+  | T.Alt -> (6, 5)   (* <|> - alternative, lowest *)
+  | T.Bind -> (8, 7)  (* >>= - monadic bind *)
+  | T.Pipe -> (7, 6)  (* >>  - monadic sequencing *)
+  | T.UFO -> (9, 8)   (* <*> - applicative functor *)
+  | T.Map -> (9, 8)   (* <$> - functor map *)
+
   (* function application: f $ x y *)
   | T.Dollar -> (dollar_bp, dollar_bp - 1) (* 10, 9 - right assoc *)
 
@@ -107,6 +114,13 @@ let token_to_binop  = function
   | T.GreaterEq -> Some Ast.BinOp.GreaterEq
   | T.Dollar -> Some Ast.BinOp.Apply
   | T.Dot -> Some Ast.BinOp.Compose
+
+  (* Monadic sequencing *)
+  | T.Bind -> Some Ast.BinOp.Bind
+  | T.Pipe -> Some Ast.BinOp.Pipe
+  | T.UFO -> Some Ast.BinOp.UFO
+  | T.Map -> Some Ast.BinOp.Map
+  | T.Alt -> Some Ast.BinOp.Alt
   | _ -> None
 
 let classify_type pstate ty_token = 
@@ -236,6 +250,21 @@ let parse_lam pstate : Ast.Expr.t parser_result =
   let* params = parse_params [] in
   let* body = parse_expr pstate in
   Ok (Ast.Expr.Lam (params, body))
+
+let parse_loop pstate : Ast.Expr.t parser_result =
+  (* loop <optional condition> body *)
+  advance pstate |> ignore; (* consume 'loop' *)
+  let* cond_opt = 
+    match peek pstate with
+    | Some T.LParen ->
+        advance pstate |> ignore; (* consume '(' *)
+        let* cond = parse_expr pstate in
+        let* _ = expect pstate T.RParen in (* consume ')' *)
+        Ok (Some cond)
+    | _ -> Ok None
+  in
+  let* body = parse_expr pstate in
+  Ok (Ast.Expr.Loop (cond_opt, body))
 
 let parse_block pstate : Ast.Expr.t parser_result =
   (* monadic block - { e1; e2; e3 } *)
