@@ -13,6 +13,8 @@ module BinOp = struct
     | LessEq
     | Greater
     | GreaterEq
+    | Apply   (* application: f x or f $ x *)
+    | Compose (* composition: f . g *)
 end
 
 module Ty = struct

@@ -46,6 +46,19 @@ let expect state e_token =
         state.pos
         (Lexer.string_of_token e_token))
 
+let expect_ident state = 
+  match peek state with
+  | Some (T.Ident id) -> 
+      state.pos <- state.pos + 1;
+      Ok id
+  | Some token ->
+      Error (Printf.sprintf "%d: Expected identifier but found %s" 
+        state.pos
+        (Lexer.string_of_token token))
+  | None ->
+      Error (Printf.sprintf "%d: Expected identifier but found end of input" 
+        state.pos)
+
 (* Parsing *)
 
 
@@ -61,6 +74,8 @@ let prefix_bp = 10
 
 (* Function application has highest precedence *)
 let app_bp = 20
+let compose_bp = 18
+let dollar_bp = 10
 
 (* (left_bp, right_bp) *)
 let infix_bp = function
@@ -69,6 +84,13 @@ let infix_bp = function
 
   (* Non-associative *)
   | T.Eq | T.NotEq | T.Less | T.LessEq | T.Greater | T.GreaterEq -> (5, 5)
+
+  (* function application: f $ x y *)
+  | T.Dollar -> (dollar_bp, dollar_bp - 1) (* 10, 9 - right assoc *)
+
+  (* function composition: f . g *)
+  | T.Dot -> (compose_bp, compose_bp - 1) (* 18, 17 - right assoc *)
+
   | _ -> (0, 0)
 
 let token_to_binop  = function
@@ -83,6 +105,8 @@ let token_to_binop  = function
   | T.LessEq -> Some Ast.BinOp.LessEq
   | T.Greater -> Some Ast.BinOp.Greater
   | T.GreaterEq -> Some Ast.BinOp.GreaterEq
+  | T.Dollar -> Some Ast.BinOp.Apply
+  | T.Dot -> Some Ast.BinOp.Compose
   | _ -> None
 
 let classify_type pstate ty_token = 
@@ -166,28 +190,18 @@ let parse_type pstate : Ast.Ty.t parser_result =
 let parse_let pstate : Ast.Expr.t parser_result = 
   (* let ident: <type> = <expr> *)
   advance pstate |> ignore; (* consume 'let' *)
-  match peek pstate with
-  | Some (T.Ident id) ->
-    advance pstate |> ignore; (* consume identifier *)
-    let* ty_opt = 
-      match peek pstate with
-      | Some T.Colon -> 
-          advance pstate |> ignore; (* consume ':' *)
-          let* ty = parse_type pstate in
-          Ok (Some ty)
-      | _ -> Ok None
-    in
-    let* _ = expect pstate T.Eq in (* consume '=' *)
-    let* expr = parse_expr pstate in
-    Ok (Ast.Expr.Let (id, ty_opt, expr))
-
-  (* Unexpected token *)
-  | Some token ->
-      Error (Printf.sprintf "%d: Expected identifier after 'let' but found %s"
-        pstate.pos
-        (Lexer.string_of_token token))
-  | None ->
-      Error (Printf.sprintf "%d: Expected identifier after 'let' but found end of input" pstate.pos)
+  let* id = expect_ident pstate in
+  let* ty_opt = 
+    match peek pstate with
+    | Some T.Colon ->
+        advance pstate |> ignore; (* consume ':' *)
+        let* ty = parse_type pstate in
+        Ok (Some ty)
+    | _ -> Ok None
+  in
+  let* _ = expect pstate T.Eq in (* consume '=' *)
+  let* expr = parse_expr pstate in
+  Ok (Ast.Expr.Let (id, ty_opt, expr))
 
 let parse_if pstate : Ast.Expr.t parser_result =
   (* if cond then <then_branch> else <else_branch> *)
@@ -231,4 +245,7 @@ let parse_block pstate : Ast.Expr.t parser_result =
 let parse_bind pstate : Ast.Expr.t parser_result =
   (* let x <- m *)
   advance pstate |> ignore; (* consume 'let' *)
-  failwith "parse_bind not implemented yet" 
+  let* id = expect_ident pstate in
+  let* _ = expect pstate T.Bind in (* consume '<-' *)
+  let* expr = parse_expr pstate in
+  Ok (Ast.Expr.Bind (id, expr))

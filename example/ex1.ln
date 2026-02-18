@@ -1,0 +1,9 @@
+// these arent two arguments, they are curried
+fn add (a:Int b:Int) -> Int = a + b
+
+// effect tracking will come later, for now it is IO monad
+fn main() -> Eff Unit = {
+    print $ "The sum is: "        >> discard
+    (print . to_string) $ add 1 2 >> discard
+    pure ()
+}

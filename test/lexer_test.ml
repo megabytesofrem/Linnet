@@ -24,13 +24,19 @@ let unary_cases = [
 ]
 
 let syntax_cases = [
-  ("f x y",       [T.Ident "f"; T.Ident "x"; T.Ident "y"; T.EOF]);
-  ("f (x y) z",   [T.Ident "f"; T.LParen; T.Ident "x"; T.Ident "y"; T.RParen; T.Ident "z"; T.EOF]);
-  ("\\x y -> x + y", [T.Backslash; T.Ident "x"; T.Ident "y"; T.Arrow; T.Ident "x"; T.Plus; T.Ident "y"; T.EOF]);
   ("let x = 10",      [T.Let; T.Ident "x"; T.Eq; T.Number 10; T.EOF]);
   ("let x: Int = 10", [T.Let; T.Ident "x"; T.Colon; T.Ident "Int"; T.Eq; T.Number 10; T.EOF]);
   ("if x > 0 then x else -x", 
     [T.If; T.Ident "x"; T.Greater; T.Number 0; T.Then; T.Ident "x"; T.Else; T.Minus; T.Ident "x"; T.EOF]);
+  ("\\x y -> x + y", [T.Backslash; T.Ident "x"; T.Ident "y"; T.Arrow; T.Ident "x"; T.Plus; T.Ident "y"; T.EOF]);
+
+  (* function application *)
+  ("f x y",       [T.Ident "f"; T.Ident "x"; T.Ident "y"; T.EOF]);
+  ("f (x y) z",   [T.Ident "f"; T.LParen; T.Ident "x"; T.Ident "y"; T.RParen; T.Ident "z"; T.EOF]);
+  ("f $ x y",     [T.Ident "f"; T.Dollar; T.Ident "x"; T.Ident "y"; T.EOF]);
+
+  (* function composition *)
+  ("f . g . h",   [T.Ident "f"; T.Dot; T.Ident "g"; T.Dot; T.Ident "h"; T.EOF]);
 
   (* block *)
   ("{ x; y; z }", [T.LCurly; T.Ident "x"; T.Semi; T.Ident "y"; T.Semi; T.Ident "z"; T.RCurly; T.EOF]);

@@ -33,9 +33,10 @@ module Token = struct
     | Comma
     | Colon
     | Semi
-    | Arrow (* -> *)
-    | Bind  (* <- *)
-    | Backslash
+    | Arrow     (* -> *)
+    | Bind      (* <- *)
+    | Backslash (* \ *)
+    | Dollar    (* $ *)
     | LParen
     | RParen
     | LBrack
@@ -60,7 +61,6 @@ module Token = struct
     | Loop
     | Match
     | Return
-    | Pure
 
     | EOF
 end
@@ -105,10 +105,10 @@ let is_ws = function
   | _ -> false
 
 let is_operator_char = function
-  | '+' | '-' | '*' | '/' | '%' 
+  | '+' | '-' | '*' | '/' | '%' | '$' 
   | '.' | ',' | '(' | ')' | '[' 
   | ']' | '{' | '}' | '=' | '!' 
-  | '<' | '>' | ':' | ';' |  '\\' -> true
+  | '<' | '>' | ':' | ';' | '\\' -> true
   | _ -> false
 
 let char_class_of = function
@@ -170,6 +170,7 @@ let classify_operator op =
   | ":" -> Token.Colon
   | ";" -> Token.Semi
   | "\\" -> Token.Backslash
+  | "$" -> Token.Dollar
   | "->" -> Token.Arrow
   | "<-" -> Token.Bind
   | "=" -> Token.Eq
@@ -232,6 +233,7 @@ let string_of_token = function
   | Token.Arrow -> "Arrow"
   | Token.Bind -> "Bind"
   | Token.Backslash -> "Backslash"
+  | Token.Dollar -> "Dollar"
   | Token.LParen -> "LParen"
   | Token.RParen -> "RParen"
   | Token.LBrack -> "LBrack"
@@ -257,7 +259,5 @@ let string_of_token = function
   | Token.Loop -> "loop"
   | Token.Match -> "match"
   | Token.Return -> "return"
-  | Token.Pure -> "pure"
-
   | Token.EOF -> "EOF"
   (* | _ -> "Unknown" *)
