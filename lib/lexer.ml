@@ -50,6 +50,8 @@ module Token = struct
     | Alt       (* <|> *)
     
     (* Keywords *)
+    | Class     (* class Show *)
+    | Impl      (* impl Show MyType *)
     | Let
     | In
     | Where
@@ -227,6 +229,8 @@ let classify_operator op =
 
 let classify_keyword maybe_kw =
   match maybe_kw with
+  | "class" -> Token.Class
+  | "impl" -> Token.Impl
   | "let" -> Token.Let
   | "in" -> Token.In
   | "where" -> Token.Where
@@ -336,7 +340,10 @@ let string_of_token = function
   | Token.Less -> "Less"
   | Token.LessEq -> "LessEq"
   | Token.Greater -> "Greater"
-  | Token.GreaterEq -> "GreaterEq" (* Keywords *)
+  | Token.GreaterEq -> "GreaterEq" 
+  (* Keywords *)
+  | Token.Class -> "Class"
+  | Token.Impl -> "Impl"
   | Token.Let -> "let"
   | Token.In -> "in"
   | Token.Where -> "where"

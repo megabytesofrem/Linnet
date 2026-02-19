@@ -264,6 +264,19 @@ and parse_tuple pstate : Ast.Expr.t parser_result =
       | [ e ] -> e (* single element tuple is just the element *)
       | _ -> Ast.Expr.Tuple es)
 
+and parse_arg_pair pstate =
+  let* name = expect_ident pstate in
+  let* _ = expect pstate T.Colon in
+  let* ty = parse_type pstate in
+  Ok (name, ty)
+
+and parse_args pstate acc =
+  match peek pstate with
+  | Some (T.Ident _) ->
+      let* arg = parse_arg_pair pstate in
+      parse_args pstate (arg :: acc)
+  | _ -> Ok (List.rev acc)
+
 and parse_type pstate : Ast.Ty.t parser_result =
   let* base_ty = parse_type_atom pstate in
   (* Check for function type arrow *)
@@ -484,3 +497,107 @@ and parse_bind pstate : Ast.Expr.t parser_result =
   Ok (Ast.Expr.Bind (id, expr))
 
   [@@ocamlformat "disable"]
+
+and parse_typeclass_decl pstate : Ast.Decl.t parser_result =
+  (* class Eq a { fn eq : a -> a -> Bool } *)
+
+  let parse_class_rule ps =
+    let* _ = expect ps T.Fn in (* consume 'fn' *)
+    let* name = expect_ident ps in
+    (* let* _ = expect ps T.Colon in *)
+    let* ty = parse_type ps in
+    Ok (name, ty)
+  in
+
+  let rec parse_rules acc =
+    match peek pstate with
+    | Some T.RCurly ->
+        advance pstate |> ignore;
+        Ok (List.rev acc)
+    | Some T.Fn ->
+        let* rule = parse_class_rule pstate in
+        parse_rules (rule :: acc)
+    | Some token ->
+        Error (Printf.sprintf "%d: Expected 'fn' or '}' but found %s" 
+          pstate.pos (Lexer.string_of_token token))
+    | None ->
+        Error (Printf.sprintf "%d: Expected class rule or '}' but found end of input" 
+          pstate.pos)
+  in
+
+  let* _ = expect pstate T.Class in
+  let* class_name = expect_ident pstate in
+  let* type_param = expect_ident pstate in
+  let* _ = expect pstate T.LCurly in
+  let* members = parse_rules [] in
+
+  Ok (Ast.Decl.Class { 
+    class_name; 
+    type_params = [type_param]; 
+    methods = members 
+  })
+
+(* and parse_typeclass_instance pstate : Ast.Decl.t parser_result =
+  (* impl Eq Int { fn eq a:Int b:Int = a == b } *)
+
+  let parse_instance_member ps = 
+    let rec parse_member_args acc =
+      match peek ps with
+      | Some (T.Ident name) ->
+          advance ps |> ignore;
+          let* _ = expect ps T.Colon in
+          let* ty = parse_type ps in
+          parse_member_args ((name, ty) :: acc)
+      | Some T.Eq -> Ok (List.rev acc)
+      | Some token ->
+          Error (Printf.sprintf "%d: Expected parameter or '=' but found %s"
+            ps.pos (Lexer.string_of_token token))
+      | None ->
+          Error (Printf.sprintf "%d: Expected parameter or '=' but found end of input"
+            ps.pos)
+    in
+
+    let* _ = expect ps T.Fn in
+    let* name = expect_ident ps in
+    let* args = parse_member_args [] in
+    let* _ = expect ps T.Eq in
+    let* body = parse_expr ps in
+    Ok (name, args, body)
+  in
+
+  let rec parse_members acc =
+    match peek pstate with
+    | Some T.RCurly ->
+        advance pstate |> ignore;
+        Ok (List.rev acc)
+    | Some T.Fn ->
+        let* member = parse_instance_member pstate in
+        parse_members (member :: acc)
+    | Some token ->
+        Error (Printf.sprintf "%d: Expected 'fn' or '}' but found %s" 
+          pstate.pos (Lexer.string_of_token token))
+    | None ->
+        Error (Printf.sprintf "%d: Expected instance member or '}' but found end of input" 
+          pstate.pos)
+  in
+
+  let* _ = expect pstate T.Impl in
+  let* class_name = expect_ident pstate in
+  let* type_args = parse_type_atom pstate in
+  let* _ = expect pstate T.LCurly in
+  let* members = parse_members [] in
+  
+  Ok (Ast.Decl.Instance { 
+    class_name; 
+    type_args = [type_args]; 
+    methods = List.map (fun (name, _args, body) -> (name, body)) members 
+  }) *)
+and parse_decl pstate : Ast.Decl.t parser_result =
+  match peek pstate with
+  | Some T.Class -> parse_typeclass_decl pstate
+  (* | Some T.Impl -> parse_typeclass_instance pstate *)
+  | Some token ->
+      Error (Printf.sprintf "%d: Expected declaration but found %s" 
+        pstate.pos (Lexer.string_of_token token))
+  | None ->
+      Error (Printf.sprintf "%d: Expected declaration but found end of input" pstate.pos)

@@ -69,6 +69,22 @@ module rec Expr : sig
 end =
   Expr
 
+and Decl : sig
+  type t =
+    (* typeclasses *)
+    | Class of {
+        class_name : string;
+        type_params : string list;
+        methods : (string * Ty.t) list; (* method name and type signature *)
+      }
+    | Instance of {
+        class_name : string;
+        type_args : Ty.t list;
+        methods : (string * Expr.t) list; (* method name and implementation *)
+      }
+end =
+  Decl
+
 and Clause : sig
   type t = Where of string * Ty.t option * Expr.t
 end =

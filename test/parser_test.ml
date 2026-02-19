@@ -8,6 +8,9 @@ let parse s : Ast.Expr.t parser_result =
 let parse_ty s : Ast.Ty.t parser_result =
   tokenize s |> create_parse_state |> parse_type
 
+let parse_decl_str s : Ast.Decl.t parser_result =
+  tokenize s |> create_parse_state |> parse_decl
+
 let unwrap = function
   | Ok expr -> expr
   | Error msg -> Alcotest.failf "Parse error: %s" msg
@@ -16,11 +19,20 @@ let unwrap_ty = function
   | Ok ty -> ty
   | Error msg -> Alcotest.failf "Parse error: %s" msg
 
+let unwrap_decl = function
+  | Ok decl -> decl
+  | Error msg -> Alcotest.failf "Parse error: %s" msg
+
 (* Test helpers with descriptive names *)
 let should_parse name input assertion =
   Alcotest.test_case name `Quick (fun () ->
       let expr = unwrap (parse input) in
       assertion expr)
+
+let should_parse_decl name input assertion =
+  Alcotest.test_case name `Quick (fun () ->
+      let decl = unwrap_decl (parse_decl_str input) in
+      assertion decl)
 
 let should_parse_type name input assertion =
   Alcotest.test_case name `Quick (fun () ->
@@ -99,6 +111,25 @@ let type_tests =
         | _ -> Alcotest.fail "Expected parameterized type Maybe Int");
   ]
 
+let decl_tests =
+  [
+    should_parse_decl "typeclass: class Eq a { fn eq a -> a -> Bool }"
+      "class Eq a { fn eq a -> a -> Bool }" (fun decl ->
+        match decl with
+        | Ast.Decl.Class
+            {
+              class_name = "Eq";
+              type_params = [ "a" ];
+              methods = [ ("eq", ty) ];
+            } -> (
+            match ty with
+            | Ast.Ty.Fn ([ Ast.Ty.TyUser "a"; Ast.Ty.TyUser "a" ], Ast.Ty.Bool)
+              ->
+                ()
+            | _ -> Alcotest.fail "Wrong method signature")
+        | _ -> Alcotest.fail "Expected class Eq a");
+  ]
+
 let lambda_tests =
   let open Ast.Expr in
   [
@@ -135,6 +166,7 @@ let () =
     [
       ("Operators", operator_tests);
       ("Types", type_tests);
+      ("Declarations", decl_tests);
       ("Lambdas", lambda_tests);
       ("Collections", collection_tests);
       ("Errors", error_tests);
