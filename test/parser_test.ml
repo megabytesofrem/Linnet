@@ -2,14 +2,18 @@ open Linnet
 open Linnet.Lexer
 open Linnet.Parser
 
-(* kleisli composition *)
-let ( >> ) f g x = g (f x)
-
 let parse s : Ast.Expr.t parser_result =
   tokenize s |> create_parse_state |> parse_expr
 
+let parse_ty s : Ast.Ty.t parser_result =
+  tokenize s |> create_parse_state |> parse_type
+
 let unwrap = function
   | Ok expr -> expr
+  | Error msg -> Alcotest.failf "Parse error: %s" msg
+
+let unwrap_ty = function
+  | Ok ty -> ty
   | Error msg -> Alcotest.failf "Parse error: %s" msg
 
 (* Test helpers with descriptive names *)
@@ -17,6 +21,11 @@ let should_parse name input assertion =
   Alcotest.test_case name `Quick (fun () ->
       let expr = unwrap (parse input) in
       assertion expr)
+
+let should_parse_type name input assertion =
+  Alcotest.test_case name `Quick (fun () ->
+      let ty = unwrap_ty (parse_ty input) in
+      assertion ty)
 
 let should_fail name input =
   Alcotest.test_case name `Quick (fun () ->
@@ -64,9 +73,30 @@ let operator_tests =
         | _ -> Alcotest.fail "Expected application f x y");
     should_parse "composition: f . g . h" "f . g . h" (fun expr ->
         match expr with
-        | Binary (Compose, Binary (Compose, Ident "f", Ident "g"), Ident "h") ->
+        | Ast.Expr.Binary
+            ( Ast.BinOp.Compose,
+              Ast.Expr.Ident "f",
+              Ast.Expr.Binary
+                (Ast.BinOp.Compose, Ast.Expr.Ident "g", Ast.Expr.Ident "h") ) ->
             ()
-        | _ -> Alcotest.fail "Expected composition f . g . h");
+        | _ ->
+            Alcotest.fail "Expected right-associative composition: f . (g . h)");
+  ]
+
+let type_tests =
+  [
+    should_parse_type "simple type: Int" "Int" (fun ty ->
+        match ty with
+        | Ast.Ty.Int -> ()
+        | _ -> Alcotest.fail "Expected type Int");
+    should_parse_type "function type: Int -> String" "Int -> String" (fun ty ->
+        match ty with
+        | Ast.Ty.Fn ([ Ast.Ty.Int ], Ast.Ty.String) -> ()
+        | _ -> Alcotest.fail "Expected function type Int -> String");
+    should_parse_type "parameterized type: Maybe Int" "Maybe Int" (fun ty ->
+        match ty with
+        | Ast.Ty.TyCons ("Maybe", [ Ast.Ty.Int ]) -> ()
+        | _ -> Alcotest.fail "Expected parameterized type Maybe Int");
   ]
 
 let lambda_tests =
@@ -104,6 +134,7 @@ let () =
   Alcotest.run "Parser Tests"
     [
       ("Operators", operator_tests);
+      ("Types", type_tests);
       ("Lambdas", lambda_tests);
       ("Collections", collection_tests);
       ("Errors", error_tests);

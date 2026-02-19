@@ -35,6 +35,7 @@ module Ty = struct
     | Float
     | String
     | Bool
+    | Unit
 
     (* complex types *)
     | TyUser of string

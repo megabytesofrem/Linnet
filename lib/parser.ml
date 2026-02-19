@@ -115,18 +115,6 @@ let token_to_binop = function
   | _ -> None
   [@@ocamlformat "disable"]
 
-let classify_type pstate ty_token =
-  match ty_token with
-  | T.Ident "Int" -> Ok Ast.Ty.Int
-  | T.Ident "Float" -> Ok Ast.Ty.Float
-  | T.Ident "Bool" -> Ok Ast.Ty.Bool
-  | T.Ident "String" -> Ok Ast.Ty.String
-  | T.Ident name -> Ok (Ast.Ty.TyUser name)
-  | token ->
-      Error
-        (Printf.sprintf "%d: Expected type but found %s" pstate.pos
-           (Lexer.string_of_token token))
-
 let can_start_arg = function
   | T.Number _
   | T.String _
@@ -277,14 +265,92 @@ and parse_tuple pstate : Ast.Expr.t parser_result =
       | _ -> Ast.Expr.Tuple es)
 
 and parse_type pstate : Ast.Ty.t parser_result =
+  let* base_ty = parse_type_atom pstate in
+  (* Check for function type arrow *)
   match peek pstate with
-  | Some ty_token ->
-      let* ty = classify_type pstate ty_token in
+  | Some T.Arrow ->
       advance pstate |> ignore;
-      Ok ty
+      let rec parse_fn_types acc =
+        let* ty = parse_type_atom pstate in
+        (* Check for type application on this argument *)
+        let* ty_with_app = parse_type_app pstate ty in
+        match peek pstate with
+        | Some T.Arrow ->
+            advance pstate |> ignore;
+            parse_fn_types (ty_with_app :: acc)
+        | _ ->
+            (* Last type is the return type *)
+            Ok (Ast.Ty.Fn (List.rev acc, ty_with_app))
+      in
+      parse_fn_types [ base_ty ]
+  | _ ->
+      (* Try to parse type application *)
+      parse_type_app pstate base_ty
+
+and parse_type_atom pstate : Ast.Ty.t parser_result =
+  (* Int, Float, Bool, String, Unit, or user-defined types *)
+  match peek pstate with
+  | Some T.Unit ->
+      advance pstate |> ignore;
+      Ok Ast.Ty.Unit
+  | Some (T.Ident name) ->
+      advance pstate |> ignore;
+      Ok
+        (match name with
+        | "Int" -> Ast.Ty.Int
+        | "Float" -> Ast.Ty.Float
+        | "Bool" -> Ast.Ty.Bool
+        | "String" -> Ast.Ty.String
+        | _ -> Ast.Ty.TyUser name)
+  | Some token ->
+      Error
+        (Printf.sprintf "%d: Expected type but found %s" pstate.pos
+           (Lexer.string_of_token token))
   | None ->
       Error
         (Printf.sprintf "%d: Expected type but found end of input" pstate.pos)
+
+and parse_type_app pstate base_ty : Ast.Ty.t parser_result =
+  (* Maybe Int, A -> B -> C *)
+  let rec loop ty args =
+    match peek pstate with
+    | Some (T.Ident _)
+    | Some T.Unit ->
+        (* parse next argument *)
+        let* arg = parse_type_atom pstate in
+        loop ty (arg :: args)
+    | Some T.Arrow -> (
+        (* stop here - arrow will be handled by parse_type *)
+        match List.rev args with
+        | [] -> Ok ty
+        | args ->
+            let name =
+              match ty with
+              | Ast.Ty.TyUser name -> name
+              | Ast.Ty.Int -> "Int"
+              | Ast.Ty.Float -> "Float"
+              | Ast.Ty.Bool -> "Bool"
+              | Ast.Ty.String -> "String"
+              | _ -> failwith "Unexpected base type in type application"
+            in
+            Ok (Ast.Ty.TyCons (name, args)))
+    | _ -> (
+        (* no more arguments *)
+        match List.rev args with
+        | [] -> Ok ty
+        | args ->
+            let name =
+              match ty with
+              | Ast.Ty.TyUser name -> name
+              | Ast.Ty.Int -> "Int"
+              | Ast.Ty.Float -> "Float"
+              | Ast.Ty.Bool -> "Bool"
+              | Ast.Ty.String -> "String"
+              | _ -> failwith "Unexpected base type in type application"
+            in
+            Ok (Ast.Ty.TyCons (name, args)))
+  in
+  loop base_ty []
 
 and parse_let pstate : Ast.Expr.t parser_result =
   (* not sure if this should be let rec or not *)
