@@ -1,54 +1,87 @@
 module T = Lexer.Token
 
-type 'a parser_result = Ok of 'a | Error of string
-type parse_state = { tokens : Lexer.Token.t list; mutable pos : int }
+(* Wrap out parser state in a monad *)
+type parse_state = { tokens : Lexer.Token.t list; pos : int }
 
-(* Monad to allow sequencing of actions within a Result type *)
-let ( let* ) result f =
-  match result with
-  | Ok x -> f x
-  | Error e -> Error e
+module Parser = Monad.State (struct
+  type t = parse_state
+end)
+
+type 'a parser = 'a Parser.m
 
 let create_parse_state tokens = { tokens; pos = 0 }
 
+(* Bring Parser operators into scope *)
+let ( let* ) = Parser.( let* )
+let return = Parser.return
+let get = Parser.get
+let put = Parser.put
+let modify = Parser.modify
+
 (* Parser primitives *)
-let peek state = List.nth_opt state.tokens state.pos
+let peek : Lexer.Token.t option parser =
+  let* st = get in
+  return (List.nth_opt st.tokens st.pos)
 
-let advance state =
-  match List.nth_opt state.tokens state.pos with
-  | Some token ->
-      state.pos <- state.pos + 1;
-      Some token
-  | None -> None
+let get_pos : int parser =
+  let* st = get in
+  return st.pos
 
-let expect state e_token =
-  match peek state with
-  | Some token when token = e_token ->
-      state.pos <- state.pos + 1;
-      Ok token
+let trace name : unit parser =
+  let* st = get in
+  let token_desc =
+    match List.nth_opt st.tokens st.pos with
+    | Some tok -> Lexer.string_of_token tok
+    | None -> "EOF"
+  in
+  (* eprintf bypasses standard buffering so you see it INSTANTLY *)
+  let () =
+    Printf.eprintf "[TRACE] %s | Pos: %d | Token: %s\n%!" name st.pos token_desc
+  in
+  return ()
+
+let fail msg : 'a parser = failwith msg
+
+let advance : Lexer.Token.t option parser =
+  let* st = get in
+  match List.nth_opt st.tokens st.pos with
   | Some token ->
-      Error
-        (Printf.sprintf "%d: Expected token %s but found %s" state.pos
-           (Lexer.string_of_token e_token)
+      let* () = put { st with pos = st.pos + 1 } in
+      return (Some token)
+  | None -> return None
+
+let expect (expected : Lexer.Token.t) : Lexer.Token.t parser =
+  let* token_opt = peek in
+  match token_opt with
+  | Some token when token = expected ->
+      let* _ = advance in
+      return token
+  | Some token ->
+      let* pos = get_pos in
+      fail
+        (Printf.sprintf "%d: Expected token %s but found %s" pos
+           (Lexer.string_of_token expected)
            (Lexer.string_of_token token))
   | None ->
-      Error
-        (Printf.sprintf "%d: Expected token %s but found end of input" state.pos
-           (Lexer.string_of_token e_token))
+      let* pos = get_pos in
+      fail
+        (Printf.sprintf "%d: Expected token %s but found end of input" pos
+           (Lexer.string_of_token expected))
 
-let expect_ident state =
-  match peek state with
+let expect_ident : string parser =
+  let* token_opt = peek in
+  match token_opt with
   | Some (T.Ident id) ->
-      state.pos <- state.pos + 1;
-      Ok id
+      let* _ = advance in
+      return id
   | Some token ->
-      Error
-        (Printf.sprintf "%d: Expected identifier but found %s" state.pos
+      let* pos = get_pos in
+      fail
+        (Printf.sprintf "%d: Expected identifier but found %s" pos
            (Lexer.string_of_token token))
   | None ->
-      Error
-        (Printf.sprintf "%d: Expected identifier but found end of input"
-           state.pos)
+      let* pos = get_pos in
+      fail (Printf.sprintf "%d: Expected identifier but found end of input" pos)
 
 (* Parsing *)
 
@@ -123,481 +156,484 @@ let can_start_arg = function
       true
   | _ -> false
 
+(* Expression parsing *)
+(* ---------------------------------- *)
+
 (* Parse a single atomic expression *)
-let rec parse_atom pstate : Ast.Expr.t parser_result =
-  let parse_group_like ps =
-    (* lookahead to check for unit (), tuple, or grouped expression *)
-    let saved_pos = ps.pos in
-    advance ps |> ignore;
-    match peek ps with
+let rec parse_atom () : Ast.Expr.t parser =
+  let* _ = trace "parse_atom" in
+  let parse_group_like () : Ast.Expr.t parser =
+    (* lookahead to check for unit (), tuple, or grouped expr *)
+    let* _ = advance in
+    let* token_opt = peek in
+    match token_opt with
     | Some T.RParen ->
         (* unit: () *)
-        advance ps |> ignore;
-        Ok Ast.Expr.Unit
+        let* _ = advance in
+        return Ast.Expr.Unit
     | Some _ -> (
         (* parse first element *)
-        let* first = parse_expr_bp ps 0 in
-        match peek ps with
-        | Some T.Comma ->
-            (* tuple: (e1, e2, ...) *)
-            ps.pos <- saved_pos;
-            (* reset position *)
-            parse_tuple ps
+        let* first = parse_expr () in
+        let* token_opt = peek in
+        match token_opt with
         | Some T.RParen ->
             (* grouped expression: (e) *)
-            advance ps |> ignore;
-            Ok first
+            let* _ = advance in
+            return first
+        | Some T.Comma ->
+            (* tuple: (e1, e2, ...) *)
+            let rec parse_rest acc =
+              let* _ = advance in
+              (* consume comma *)
+              let* next = parse_expr () in
+              let* t_opt = peek in
+              match t_opt with
+              | Some T.Comma -> parse_rest (next :: acc)
+              | Some T.RParen ->
+                  let* _ = advance in
+                  return (Ast.Expr.Tuple (List.rev (next :: acc)))
+              | Some t ->
+                  fail
+                    (Printf.sprintf "Expected ',' or ')' but found %s"
+                       (Lexer.string_of_token t))
+              | None -> fail "Expected ',' or ')' but found EOF"
+            in
+            parse_rest [ first ]
         | Some token ->
-            Error
-              (Printf.sprintf "%d: Expected ',' or ')' but found %s" ps.pos
+            let* pos = get_pos in
+            fail
+              (Printf.sprintf "%d: Expected ',' or ')' but found %s" pos
                  (Lexer.string_of_token token))
         | None ->
-            Error
-              (Printf.sprintf "%d: Expected ')' but found end of input" ps.pos))
+            let* pos = get_pos in
+            fail (Printf.sprintf "%d: Expected ')' but found end of input" pos))
     | None ->
-        Error
+        let* pos = get_pos in
+        fail
           (Printf.sprintf
-             "%d: Expected expression or ')' but found end of input" ps.pos)
+             "%d: Expected expression or ')' but found end of input" pos)
   in
 
-  match peek pstate with
+  let* token_opt = peek in
+  match token_opt with
   | Some (T.Number _ as token) ->
-      advance pstate |> ignore;
-      Ok (Ast.Expr.Literal token)
+      let* _ = advance in
+      return (Ast.Expr.Literal token)
   | Some (T.String _ as token) ->
-      advance pstate |> ignore;
-      Ok (Ast.Expr.Literal token)
+      let* _ = advance in
+      return (Ast.Expr.Literal token)
   | Some (T.Ident id) ->
-      advance pstate |> ignore;
-      Ok (Ast.Expr.Ident id)
-  (* keywords *)
-  | Some T.Let -> parse_let pstate
-  | Some T.If -> parse_if pstate
-  | Some T.Loop -> parse_loop pstate
-  (* special cases *)
-  | Some T.Backslash -> parse_lam pstate
-  | Some T.LBrack -> parse_list pstate
-  | Some T.LCurly -> parse_block pstate
-  | Some T.LParen -> parse_group_like pstate
-  (* end special cases *)
+      let* _ = advance in
+      return (Ast.Expr.Ident id)
+  | Some T.LParen -> parse_group_like ()
+  | Some T.LBrack -> parse_list ()
+  | Some T.Backslash -> parse_lambda ()
+  | Some T.Let -> parse_let ()
+  | Some T.If -> parse_if ()
+  | Some T.Loop -> parse_loop ()
+  (* *)
+  (* Handle prefix operators *)
   | Some token ->
-      Error
-        (Printf.sprintf "%d: Unexpected token %s" pstate.pos
+      let* pos = get_pos in
+      fail
+        (Printf.sprintf "%d: Expected expression but found %s" pos
            (Lexer.string_of_token token))
-  | None -> Error (Printf.sprintf "%d: Unexpected end of input" pstate.pos)
+  | None ->
+      let* pos = get_pos in
+      fail (Printf.sprintf "%d: Expected expression but found end of input" pos)
 
-(* Parse an expression with a given minimum binding power *)
-and parse_expr_bp pstate min_bp : Ast.Expr.t parser_result =
-  let* lhs = parse_atom pstate in
+and parse_expr_bp min_bp : Ast.Expr.t parser =
+  let* _ = trace "parse_expr_bp" in
+
+  let* lhs = parse_atom () in
   let rec loop lhs =
-    match peek pstate with
+    let* _ = trace "parse_expr_bp loop" in
+    let* token_opt = peek in
+    match token_opt with
     | Some op -> (
         if can_start_arg op && app_bp >= min_bp then
           (* function application *)
-          let* arg = parse_expr_bp pstate (app_bp + 1) in
-          loop (Ast.Expr.App (lhs, arg))
-        else
-          (* infix operator *)
-          let l_bp, r_bp = infix_bp op in
+          let* pre_pos = get_pos in
+          let* arg = parse_expr_bp (app_bp + 1) in
+          let* post_pos = get_pos in
 
-          (* if the precedence is less than min_bp, stop and return lhs *)
-          if l_bp < min_bp then Ok lhs
+          if post_pos = pre_pos then
+            (* no progress, avoid infinite loop *)
+            return lhs
+          else loop (Ast.Expr.App (lhs, arg))
+        else
+          let l_bp, r_bp = infix_bp op in
+          if l_bp < min_bp then return lhs
           else
-            (* otherwise, consume and recursive parse the rhs *)
+            (* otherwise, consume and recursively parse rhs *)
             match token_to_binop op with
             | Some binop ->
-                advance pstate |> ignore;
-                let* rhs = parse_expr_bp pstate r_bp in
+                let* _ = advance in
+                let* rhs = parse_expr_bp r_bp in
                 loop (Ast.Expr.Binary (binop, lhs, rhs))
-            | None -> Ok lhs)
-    | None -> Ok lhs
+            | None -> return lhs)
+    | None -> return lhs
   in
   loop lhs
 
-and parse_expr pstate : Ast.Expr.t parser_result = parse_expr_bp pstate 0
+and parse_expr () : Ast.Expr.t parser = parse_expr_bp 0
 
-and parse_enclosed pstate o s c f ctor =
-  let* _ = expect pstate o in
-  let rec parse_elements acc =
-    match peek pstate with
-    | Some token when token = c ->
-        (* end of enclosed *)
-        advance pstate |> ignore;
-        Ok (ctor (List.rev acc))
+and parse_enclosed o s c f ctor : Ast.Expr.t parser =
+  let* _ = expect o in
+  let rec parse_elems acc =
+    let* token_opt = peek in
+    match token_opt with
+    | Some t when t = c ->
+        let* _ = advance in
+        return (ctor (List.rev acc))
     | Some _ -> (
-        (* parse enclosed item *)
-        let* elem = f pstate in
-        match peek pstate with
-        | Some token when token = s ->
-            advance pstate |> ignore;
-            parse_elements (elem :: acc)
+        let* elem = f in
+        let* token_opt = peek in
+        match token_opt with
+        | Some t when t = s ->
+            let* _ = advance in
+            parse_elems (elem :: acc)
         | Some token when token = c ->
-            advance pstate |> ignore;
-            Ok (ctor (List.rev (elem :: acc)))
+            let* _ = advance in
+            return (ctor (List.rev (elem :: acc)))
         | Some token ->
-            Error
-              (Printf.sprintf "%d: Expected %s or %s but found %s" pstate.pos
-                 (Lexer.string_of_token o) (Lexer.string_of_token c)
+            let* pos = get_pos in
+            fail
+              (Printf.sprintf "%d: Expected '%s' or '%s' but found %s" pos
+                 (Lexer.string_of_token s) (Lexer.string_of_token c)
                  (Lexer.string_of_token token))
         | None ->
-            Error
-              (Printf.sprintf "%d: Expected %s or %s but found end of input"
-                 pstate.pos (Lexer.string_of_token o) (Lexer.string_of_token c))
-        )
+            let* pos = get_pos in
+            fail
+              (Printf.sprintf "%d: Expected '%s' or '%s' but found end of input"
+                 pos (Lexer.string_of_token s) (Lexer.string_of_token c)))
     | None ->
-        (* end of input, invalid state *)
-        Error
-          (Printf.sprintf "%d: Expected %s or %s but found end of input"
-             pstate.pos (Lexer.string_of_token o) (Lexer.string_of_token c))
+        let* pos = get_pos in
+        fail
+          (Printf.sprintf
+             "%d: Expected '%s' or expression but found end of input" pos
+             (Lexer.string_of_token c))
   in
-  parse_elements []
+  parse_elems []
 
-and parse_list pstate : Ast.Expr.t parser_result =
+and parse_enclosed_generic (type a) o s c (f : unit -> a parser) : a list parser
+    =
+  let* _ = expect o in
+  let rec parse_elems acc =
+    let* token_opt = peek in
+    match token_opt with
+    | Some t when t = c ->
+        let* _ = advance in
+        return (List.rev acc)
+    | Some _ -> (
+        let* elem = f () in
+        let* token_opt = peek in
+        match token_opt with
+        | Some t when t = s ->
+            let* _ = advance in
+            parse_elems (elem :: acc)
+        | Some token when token = c ->
+            let* _ = advance in
+            return (List.rev (elem :: acc))
+        | Some token ->
+            let* pos = get_pos in
+            fail
+              (Printf.sprintf "%d: Expected '%s' or '%s' but found %s" pos
+                 (Lexer.string_of_token s) (Lexer.string_of_token c)
+                 (Lexer.string_of_token token))
+        | None ->
+            let* pos = get_pos in
+            fail
+              (Printf.sprintf "%d: Expected '%s' or '%s' but found end of input"
+                 pos (Lexer.string_of_token s) (Lexer.string_of_token c)))
+    | None ->
+        let* pos = get_pos in
+        fail
+          (Printf.sprintf "%d: Expected '%s' or element but found end of input"
+             pos (Lexer.string_of_token c))
+  in
+  parse_elems []
+
+and parse_list () : Ast.Expr.t parser =
   (* [e1, e2, e3] *)
-  parse_enclosed pstate T.LBrack T.Comma T.RBrack parse_expr (fun es ->
-      Ast.Expr.List es)
+  parse_enclosed T.LBrack T.Comma T.RBrack (parse_expr ()) (fun elems ->
+      Ast.Expr.List elems)
 
-and parse_tuple pstate : Ast.Expr.t parser_result =
+and parse_tuple () : Ast.Expr.t parser =
   (* (e1, e2, e3) *)
-  parse_enclosed pstate T.LParen T.Comma T.RParen parse_expr (fun es ->
-      match es with
-      | [ e ] -> e (* single element tuple is just the element *)
-      | _ -> Ast.Expr.Tuple es)
+  parse_enclosed T.LParen T.Comma T.RParen (parse_expr ()) (fun elems ->
+      match elems with
+      | [ single ] -> single
+      | _ -> Ast.Expr.Tuple elems)
 
-and parse_arg_pair pstate =
-  let* name = expect_ident pstate in
-  let* _ = expect pstate T.Colon in
-  let* ty = parse_type pstate in
-  Ok (name, ty)
+and parse_arg_pair s =
+  let* name = expect_ident in
+  let* _ = expect s in
+  let* value = parse_expr () in
+  return (name, value)
 
-and parse_args pstate acc =
-  match peek pstate with
-  | Some (T.Ident _) ->
-      let* arg = parse_arg_pair pstate in
-      parse_args pstate (arg :: acc)
-  | _ -> Ok (List.rev acc)
+(* ---------------------------------- *)
+(* Type parsing *)
+(* ---------------------------------- *)
 
-and parse_type pstate : Ast.Ty.t parser_result =
-  let* base_ty = parse_type_atom pstate in
-  (* Check for function type arrow *)
-  match peek pstate with
+and parse_fn_types (first_arg : Ast.Ty.t) =
+  (* We've already consumed the '->', so parse the next full type *)
+  let* next_ty = parse_type () in
+  match next_ty with
+  | Ast.Ty.Fn (args, ret) ->
+      (* Right-associative: A -> (B -> C) *)
+      return (Ast.Ty.Fn (first_arg :: args, ret))
+  | _ -> return (Ast.Ty.Fn ([ first_arg ], next_ty))
+
+and parse_type () : Ast.Ty.t parser =
+  let* base_ty = parse_type_atom () in
+
+  (* try to parse type application first (greedily) *)
+  let* ty_after_app = parse_type_app base_ty in
+
+  (* check for function type -> *)
+  let* token_opt = peek in
+  match token_opt with
   | Some T.Arrow ->
-      advance pstate |> ignore;
-      let rec parse_fn_types acc =
-        let* ty = parse_type_atom pstate in
-        (* Check for type application on this argument *)
-        let* ty_with_app = parse_type_app pstate ty in
-        match peek pstate with
-        | Some T.Arrow ->
-            advance pstate |> ignore;
-            parse_fn_types (ty_with_app :: acc)
-        | _ ->
-            (* Last type is the return type *)
-            Ok (Ast.Ty.Fn (List.rev acc, ty_with_app))
-      in
-      parse_fn_types [ base_ty ]
-  | _ ->
-      (* Try to parse type application *)
-      parse_type_app pstate base_ty
+      let* _ = advance in
+      parse_fn_types ty_after_app
+  | _ -> return ty_after_app
 
-and parse_type_atom pstate : Ast.Ty.t parser_result =
-  (* Int, Float, Bool, String, Unit, or user-defined types *)
-  match peek pstate with
+and parse_type_params () : string list parser =
+  (* [a, b, c] *)
+  let* token_opt = peek in
+  match token_opt with
+  | Some T.LBrack ->
+      parse_enclosed_generic T.LBrack T.Comma T.RBrack (fun () ->
+          let* param = expect_ident in
+          return param)
+  | _ -> return [] (* no type parameters *)
+
+and parse_type_atom () : Ast.Ty.t parser =
+  let* token_opt = peek in
+  match token_opt with
   | Some T.Unit ->
-      advance pstate |> ignore;
-      Ok Ast.Ty.Unit
+      let* _ = advance in
+      return Ast.Ty.Unit
   | Some (T.Ident name) ->
-      advance pstate |> ignore;
-      Ok
+      let* _ = advance in
+      return
         (match name with
         | "Int" -> Ast.Ty.Int
         | "Float" -> Ast.Ty.Float
-        | "Bool" -> Ast.Ty.Bool
         | "String" -> Ast.Ty.String
-        | _ -> Ast.Ty.TyUser name)
+        | "Bool" -> Ast.Ty.Bool
+        | other -> Ast.Ty.TyCons (other, []))
+  | Some T.LParen ->
+      (* parenthesized type *)
+      let* _ = advance in
+      let* ty = parse_type () in
+      let* _ = expect T.RParen in
+      return ty
   | Some token ->
-      Error
-        (Printf.sprintf "%d: Expected type but found %s" pstate.pos
+      let* pos = get_pos in
+      fail
+        (Printf.sprintf "%d: Expected type but found %s" pos
            (Lexer.string_of_token token))
   | None ->
-      Error
-        (Printf.sprintf "%d: Expected type but found end of input" pstate.pos)
+      let* pos = get_pos in
+      fail (Printf.sprintf "%d: Expected type but found end of input" pos)
 
-and parse_type_app pstate base_ty : Ast.Ty.t parser_result =
-  (* Maybe Int, A -> B -> C *)
-  let rec loop ty args =
-    match peek pstate with
+and parse_type_app (base_ty : Ast.Ty.t) : Ast.Ty.t parser =
+  let* _ = trace "parse_type_app" in
+
+  let rec loop args =
+    let* _ = trace "parse_type_app loop" in
+    let* token_opt = peek in
+    match token_opt with
+    (* valid type atoms that can follow a constructor *)
     | Some (T.Ident _)
-    | Some T.Unit ->
-        (* parse next argument *)
-        let* arg = parse_type_atom pstate in
-        loop ty (arg :: args)
-    | Some T.Arrow -> (
-        (* stop here - arrow will be handled by parse_type *)
-        match List.rev args with
-        | [] -> Ok ty
-        | args ->
-            let name =
-              match ty with
-              | Ast.Ty.TyUser name -> name
-              | Ast.Ty.Int -> "Int"
-              | Ast.Ty.Float -> "Float"
-              | Ast.Ty.Bool -> "Bool"
-              | Ast.Ty.String -> "String"
-              | _ -> failwith "Unexpected base type in type application"
-            in
-            Ok (Ast.Ty.TyCons (name, args)))
-    | _ -> (
-        (* no more arguments *)
-        match List.rev args with
-        | [] -> Ok ty
-        | args ->
-            let name =
-              match ty with
-              | Ast.Ty.TyUser name -> name
-              | Ast.Ty.Int -> "Int"
-              | Ast.Ty.Float -> "Float"
-              | Ast.Ty.Bool -> "Bool"
-              | Ast.Ty.String -> "String"
-              | _ -> failwith "Unexpected base type in type application"
-            in
-            Ok (Ast.Ty.TyCons (name, args)))
+    | Some T.Unit
+    | Some T.LParen ->
+        let* arg = parse_type_atom () in
+        loop (arg :: args)
+    | _ -> return (List.rev args)
   in
-  loop base_ty []
+  let* args = loop [] in
+  match args with
+  | [] -> return base_ty
+  | _ -> (
+      (* extract the base identifier *)
+      match base_ty with
+      | Ast.Ty.TyCons (n, []) -> return (Ast.Ty.TyCons (n, args))
+      | Ast.Ty.Int -> return (Ast.Ty.TyCons ("Int", args))
+      | Ast.Ty.String -> return (Ast.Ty.TyCons ("String", args))
+      | Ast.Ty.Bool -> return (Ast.Ty.TyCons ("Bool", args))
+      | Ast.Ty.Unit -> return (Ast.Ty.TyCons ("Unit", args))
+      | _ ->
+          let* pos = get_pos in
+          fail
+            (Printf.sprintf
+               "%d: Expected type constructor but found complex type" pos))
 
-and parse_let pstate : Ast.Expr.t parser_result =
-  (* not sure if this should be let rec or not *)
+(* ---------------------------------- *)
 
-  (* let ident: <type> = <expr> *)
-  advance pstate |> ignore; (* consume 'let' *)
-  let* id = expect_ident pstate in
-  let* ty_opt = 
-    match peek pstate with
+and parse_let () : Ast.Expr.t parser =
+  let* _ = advance in
+  let* name = expect_ident in
+  let* ty_opt =
+    let* token_opt = peek in
+    match token_opt with
     | Some T.Colon ->
-        advance pstate |> ignore; (* consume ':' *)
-        let* ty = parse_type pstate in
-        Ok (Some ty)
-    | _ -> Ok None
+        let* _ = advance in
+        let* ty = parse_type () in
+        return (Some ty)
+    | _ -> return None
   in
-  let* _ = expect pstate T.Eq in (* consume '=' *)
-  let* expr = parse_expr pstate in
+  let* _ = expect T.Eq in
+  let* expr = parse_expr () in
+  return (Ast.Expr.Let (name, ty_opt, expr))
 
-  (* check for in or where clause *)
-    match peek pstate with
-    | Some T.In ->
-        advance pstate |> ignore; (* consume 'in' *)
-        let* body = parse_expr pstate in
-        Ok (Ast.Expr.LetIn (id, ty_opt, expr, body))
-    | Some T.Where ->
-        advance pstate |> ignore; (* consume 'where' *)
-        let* clauses = parse_where_clauses pstate in
-        Ok (Ast.Expr.LetWhere (id, ty_opt, expr, clauses))
-    | _ ->
+and parse_if () : Ast.Expr.t parser =
+  (* if cond then <then_branch> else <else_branch> *)
+  let* _ = advance in
+  let* cond = parse_expr () in
+  let* _ = expect T.Then in
+  let* then_branch = parse_expr () in
+  let* _ = expect T.Else in
+  let* else_branch = parse_expr () in
+  return (Ast.Expr.If (cond, then_branch, else_branch))
 
-  Ok (Ast.Expr.Let (id, ty_opt, expr))
+and parse_lambda () : Ast.Expr.t parser =
+  (* \x y -> body *)
+  let* _ = advance in
 
-  [@@ocamlformat "disable"]
+  (* recursive function to parse parameters *)
+  let rec parse_params acc =
+    let* token_opt = peek in
+    match token_opt with
+    | Some (T.Ident param) ->
+        let* _ = advance in
+        parse_params (param :: acc)
+    | Some T.Arrow ->
+        (* consume -> *)
+        let* _ = advance in
+        return (List.rev acc)
+    | Some token ->
+        let* pos = get_pos in
+        fail
+          (Printf.sprintf "%d: Expected parameter name or '->' but found %s" pos
+             (Lexer.string_of_token token))
+    | None ->
+        let* pos = get_pos in
+        fail
+          (Printf.sprintf
+             "%d: Expected parameter name or '->' but found end of input" pos)
+  in
+  let* params = parse_params [] in
+  let* body = parse_expr () in
+  return (Ast.Expr.Lam (params, body))
 
-and parse_where_clauses pstate : Ast.Clause.t list parser_result =
-  (* let result = expr where x = 10 *)
-  let parse_clause ps = 
-    advance ps |> ignore; (* consume 'where' *)
-    let* id = expect_ident ps in
-    let* ty_opt = 
-      match peek ps with
-      | Some T.Colon ->
-          advance ps |> ignore; (* consume ':' *)
-          let* ty = parse_type ps in
-          Ok (Some ty)
-      | _ -> Ok None
-    in
-    let* _ = expect ps T.Eq in (* consume '=' *)
-    let* expr = parse_expr ps in
-    Ok (Ast.Clause.Where (id, ty_opt, expr))
+and parse_loop () : Ast.Expr.t parser =
+  (* loop (cond) body *)
+  let* _ = advance in
+  let* cond_opt =
+    let* token_opt = peek in
+    match token_opt with
+    | Some T.LParen ->
+        let* _ = advance in
+        let* cond = parse_expr () in
+        let* _ = expect T.RParen in
+        return (Some cond)
+    | _ -> return None
+  in
+  let* body = parse_expr () in
+  return (Ast.Expr.Loop (cond_opt, body))
+
+and parse_bind () : Ast.Expr.t parser =
+  (* x <- m *)
+  let* name = expect_ident in
+  let* _ = expect T.Bind in
+  let* expr = parse_expr () in
+  return (Ast.Expr.Bind (name, expr))
+
+(* Typeclasses *)
+(* ---------------------------------- *)
+
+and parse_typeclass_decl () : Ast.Decl.t parser =
+  (* 
+    class Functor[f] {
+       fn fmap[a,b] : (a -> b) -> f a -> f b
+    }
+  *)
+  let parse_class_rule () =
+    let* _ = expect T.Fn in
+    let* name = expect_ident in
+    let* type_params = parse_type_params () in
+    let* _ = expect T.Colon in
+    let* ty = parse_type () in
+    return (name, type_params, ty)
   in
 
-  (* parse many where clauses *)
+  (* parse class rules *)
+  let rec parse_rules acc =
+    let* token_opt = peek in
+    match token_opt with
+    | Some T.RCurly ->
+        let* _ = advance in
+        return (List.rev acc)
+    | Some T.Fn ->
+        let* rule = parse_class_rule () in
+        parse_rules (rule :: acc)
+    | Some token ->
+        let* pos = get_pos in
+        fail
+          (Printf.sprintf "%d: Expected 'fn' or '}' but found %s" pos
+             (Lexer.string_of_token token))
+    | None ->
+        let* pos = get_pos in
+        fail
+          (Printf.sprintf "%d: Expected 'fn' or '}' but found end of input" pos)
+  in
+
+  let* _ = expect T.Class in
+  let* class_name = expect_ident in
+  let* type_params = parse_type_params () in
+  let* _ = expect T.LCurly in
+  let* members = parse_rules [] in
+
+  return (Ast.Decl.Class { class_name; type_params; methods = members })
+
+(* ---------------------------------- *)
+
+(* Parse a single top-level declaration *)
+let parse_decl () : Ast.Decl.t parser =
+  let* token_opt = peek in
+  match token_opt with
+  | Some T.Class -> parse_typeclass_decl ()
+  | Some _ ->
+      (* Parse top level expression - don't check for remaining tokens here *)
+      let* expr = parse_expr () in
+      return (Ast.Decl.Expr expr)
+  | None ->
+      let* pos = get_pos in
+      fail
+        (Printf.sprintf "%d: Expected declaration but found end of input" pos)
+
+(* Parse the whole program *)
+let parse_program () : Ast.Decl.t list parser =
+  let* _ = trace "parse_program" in
   let rec loop acc =
-    match peek pstate with
-    | Some T.Where ->
-        let* clause = parse_clause pstate in
-        loop (clause :: acc)
-    | _ -> Ok (List.rev acc)
+    let* _ = trace "parse_program loop" in
+    let* token_opt = peek in
+    match token_opt with
+    | None -> return (List.rev acc)
+    | Some _ ->
+        let* decl = parse_decl () in
+        loop (decl :: acc)
   in
   loop []
 
-and parse_if pstate : Ast.Expr.t parser_result =
-  (* if cond then <then_branch> else <else_branch> *)
-  advance pstate |> ignore; (* consume if *)
-  let* cond = parse_expr pstate in
-  let* _ = expect pstate T.Then in (* consume then *)
-  let* then_branch = parse_expr pstate in
-  let* _ = expect pstate T.Else in (* consume else *)
-  let* else_branch = parse_expr pstate in
-  Ok (Ast.Expr.If (cond, then_branch, Some else_branch))
-
-  [@@ocamlformat "disable"]
-
-and parse_lam pstate : Ast.Expr.t parser_result =
-  (* \x y -> body *)
-  advance pstate |> ignore; (* consume '\' *)
-
-  (* recursive function that parses parameters *)
-  let rec parse_params acc = 
-    match peek pstate with
-    | Some (T.Ident id) ->
-        advance pstate |> ignore;
-        parse_params (id :: acc)
-    | Some T.Arrow ->
-        advance pstate |> ignore; (* consume '->' *)
-        Ok (List.rev acc)
-    | Some token ->
-        Error (Printf.sprintf "%d: Expected parameter name or '->' but found %s"
-          pstate.pos
-          (Lexer.string_of_token token))
-    | None ->
-        Error (Printf.sprintf "%d: Expected parameter name or '->' but found end of input" pstate.pos)
-  in
-  let* params = parse_params [] in
-  let* body = parse_expr pstate in
-  Ok (Ast.Expr.Lam (params, body))
-
-  [@@ocamlformat "disable"]
-
-and parse_loop pstate : Ast.Expr.t parser_result =
-  (* loop (<optional condition>) body *)
-  advance pstate |> ignore; (* consume 'loop' *)
-  let* cond_opt = 
-    match peek pstate with
-    | Some T.LParen ->
-        advance pstate |> ignore; (* consume '(' *)
-        let* cond = parse_expr pstate in
-        let* _ = expect pstate T.RParen in (* consume ')' *)
-        Ok (Some cond)
-    | _ -> Ok None
-  in
-  let* body = parse_expr pstate in
-  Ok (Ast.Expr.Loop (cond_opt, body))
-
-  [@@ocamlformat "disable"]
-
-and parse_block pstate : Ast.Expr.t parser_result =
-  (* monadic block: { e1; e2; e3 } *)
-  advance pstate |> ignore; (* consume '{' *)
-  failwith "parse_block not implemented yet"
-
-  [@@ocamlformat "disable"]
-
-and parse_bind pstate : Ast.Expr.t parser_result =
-  (* let x <- m *)
-  advance pstate |> ignore; (* consume 'let' *)
-  let* id = expect_ident pstate in
-  let* _ = expect pstate T.Bind in (* consume '<-' *)
-  let* expr = parse_expr pstate in
-  Ok (Ast.Expr.Bind (id, expr))
-
-  [@@ocamlformat "disable"]
-
-and parse_typeclass_decl pstate : Ast.Decl.t parser_result =
-  (* class Eq a { fn eq : a -> a -> Bool } *)
-
-  let parse_class_rule ps =
-    let* _ = expect ps T.Fn in (* consume 'fn' *)
-    let* name = expect_ident ps in
-    (* let* _ = expect ps T.Colon in *)
-    let* ty = parse_type ps in
-    Ok (name, ty)
-  in
-
-  let rec parse_rules acc =
-    match peek pstate with
-    | Some T.RCurly ->
-        advance pstate |> ignore;
-        Ok (List.rev acc)
-    | Some T.Fn ->
-        let* rule = parse_class_rule pstate in
-        parse_rules (rule :: acc)
-    | Some token ->
-        Error (Printf.sprintf "%d: Expected 'fn' or '}' but found %s" 
-          pstate.pos (Lexer.string_of_token token))
-    | None ->
-        Error (Printf.sprintf "%d: Expected class rule or '}' but found end of input" 
-          pstate.pos)
-  in
-
-  let* _ = expect pstate T.Class in
-  let* class_name = expect_ident pstate in
-  let* type_param = expect_ident pstate in
-  let* _ = expect pstate T.LCurly in
-  let* members = parse_rules [] in
-
-  Ok (Ast.Decl.Class { 
-    class_name; 
-    type_params = [type_param]; 
-    methods = members 
-  })
-
-(* and parse_typeclass_instance pstate : Ast.Decl.t parser_result =
-  (* impl Eq Int { fn eq a:Int b:Int = a == b } *)
-
-  let parse_instance_member ps = 
-    let rec parse_member_args acc =
-      match peek ps with
-      | Some (T.Ident name) ->
-          advance ps |> ignore;
-          let* _ = expect ps T.Colon in
-          let* ty = parse_type ps in
-          parse_member_args ((name, ty) :: acc)
-      | Some T.Eq -> Ok (List.rev acc)
-      | Some token ->
-          Error (Printf.sprintf "%d: Expected parameter or '=' but found %s"
-            ps.pos (Lexer.string_of_token token))
-      | None ->
-          Error (Printf.sprintf "%d: Expected parameter or '=' but found end of input"
-            ps.pos)
-    in
-
-    let* _ = expect ps T.Fn in
-    let* name = expect_ident ps in
-    let* args = parse_member_args [] in
-    let* _ = expect ps T.Eq in
-    let* body = parse_expr ps in
-    Ok (name, args, body)
-  in
-
-  let rec parse_members acc =
-    match peek pstate with
-    | Some T.RCurly ->
-        advance pstate |> ignore;
-        Ok (List.rev acc)
-    | Some T.Fn ->
-        let* member = parse_instance_member pstate in
-        parse_members (member :: acc)
-    | Some token ->
-        Error (Printf.sprintf "%d: Expected 'fn' or '}' but found %s" 
-          pstate.pos (Lexer.string_of_token token))
-    | None ->
-        Error (Printf.sprintf "%d: Expected instance member or '}' but found end of input" 
-          pstate.pos)
-  in
-
-  let* _ = expect pstate T.Impl in
-  let* class_name = expect_ident pstate in
-  let* type_args = parse_type_atom pstate in
-  let* _ = expect pstate T.LCurly in
-  let* members = parse_members [] in
-  
-  Ok (Ast.Decl.Instance { 
-    class_name; 
-    type_args = [type_args]; 
-    methods = List.map (fun (name, _args, body) -> (name, body)) members 
-  }) *)
-and parse_decl pstate : Ast.Decl.t parser_result =
-  match peek pstate with
-  | Some T.Class -> parse_typeclass_decl pstate
-  (* | Some T.Impl -> parse_typeclass_instance pstate *)
-  | Some token ->
-      Error (Printf.sprintf "%d: Expected declaration but found %s" 
-        pstate.pos (Lexer.string_of_token token))
-  | None ->
-      Error (Printf.sprintf "%d: Expected declaration but found end of input" pstate.pos)
+(* Run the parser *)
+let parse parser tokens =
+  try
+    let result, _ = Parser.run parser (create_parse_state tokens) in
+    Ok result
+  with
+  | Failure msg -> Error msg
+  | exn -> Error (Printexc.to_string exn)

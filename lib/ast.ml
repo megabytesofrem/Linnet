@@ -38,7 +38,6 @@ module Ty = struct
     | Unit
 
     (* complex types *)
-    | TyUser of string
     | TyCons of string * t list   (* parameterized type constructor *)
     | Fn of t list * t            (* function type *)
     | Eff of t * effect_ty list
@@ -60,7 +59,7 @@ module rec Expr : sig
     | Let of string * Ty.t option * t (* optional type annotation *)
     | LetIn of string * Ty.t option * t * t (* let x = expr in body *)
     | LetWhere of string * Ty.t option * t * Clause.t list (* let x = expr where ... *)
-    | If of t * t * t option (* if cond then expr else expr  *)
+    | If of t * t * t        (* if cond then expr else expr  *)
     | Loop of t option * t   (* loop (condition) body *)
     | Block of t list        (* { e1; e2; e3 } *)
     | Bind of string * t     (* let x <- m *)
@@ -71,16 +70,20 @@ end =
 
 and Decl : sig
   type t =
-    (* typeclasses *)
+    (* Top level expression *)
+    | Expr of Expr.t
+    (* Typeclasses *)
     | Class of {
         class_name : string;
         type_params : string list;
-        methods : (string * Ty.t) list; (* method name and type signature *)
+        methods : (string * string list * Ty.t) list;
+            (* method name and type signature *)
       }
     | Instance of {
         class_name : string;
-        type_args : Ty.t list;
-        methods : (string * Expr.t) list; (* method name and implementation *)
+        type_args : Ty.t;
+        methods : (string * string list * Ty.t * Expr.t) list;
+            (* method name and implementation *)
       }
 end =
   Decl

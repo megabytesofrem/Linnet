@@ -1,2 +1,15 @@
 let xs = [1,2,3,4]
 let ys = (1, 2)
+
+
+class Eq[a] {
+    fn eq[a] : a -> a -> Bool
+}
+
+impl Eq[Int] {
+    fn eq a b : Bool = a == b
+}
+
+impl Eq[String] {
+    fn eq a b : Bool = string_cmp(a, b)
+}
