@@ -379,11 +379,7 @@ and parse_arg_pair s =
 and parse_fn_types (first_arg : Ast.Ty.t) =
   (* We've already consumed the '->', so parse the next full type *)
   let* next_ty = parse_type () in
-  match next_ty with
-  | Ast.Ty.Fn (args, ret) ->
-      (* Right-associative: A -> (B -> C) *)
-      return (Ast.Ty.Fn (first_arg :: args, ret))
-  | _ -> return (Ast.Ty.Fn ([ first_arg ], next_ty))
+  return (Ast.Ty.Fn (first_arg, next_ty))
 
 and parse_type () : Ast.Ty.t parser =
   let* base_ty = parse_type_atom () in
@@ -415,15 +411,19 @@ and parse_type_atom () : Ast.Ty.t parser =
   | Some T.Unit ->
       let* _ = advance in
       return Ast.Ty.Unit
-  | Some (T.Ident name) ->
+  | Some (T.Ident name) -> (
       let* _ = advance in
-      return
-        (match name with
-        | "Int" -> Ast.Ty.Int
-        | "Float" -> Ast.Ty.Float
-        | "String" -> Ast.Ty.String
-        | "Bool" -> Ast.Ty.Bool
-        | other -> Ast.Ty.TyCons (other, []))
+      (* Check if it's a built-in type *)
+      match name with
+      | "Int" -> return Ast.Ty.Int
+      | "Float" -> return Ast.Ty.Float
+      | "String" -> return Ast.Ty.String
+      | "Bool" -> return Ast.Ty.Bool
+      | _ ->
+          (* Check for type constructor (capitalized) vs type variable (lowercase) *)
+          if String.length name > 0 && Char.uppercase_ascii name.[0] = name.[0]
+          then return (Ast.Ty.TyCons (name, []))
+          else return (Ast.Ty.Var name))
   | Some T.LParen ->
       (* parenthesized type *)
       let* _ = advance in

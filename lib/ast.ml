@@ -31,16 +31,11 @@ module Ty = struct
   type effect_ty = IO | FS | Network | Random | UserEff of string
 
   type t = 
-    | Int
-    | Float
-    | String
-    | Bool
-    | Unit
-
-    (* complex types *)
-    | TyCons of string * t list   (* parameterized type constructor *)
-    | Fn of t list * t            (* function type *)
-    | Eff of t * effect_ty list
+    | Int | Float | String | Bool | Unit
+    | Var of string
+    | Forall of string * t      (* forall a. ... *)
+    | Fn of t * t 
+    | TyCons of string * t list (* Maybe Int, Either String Int *)
 
     [@@ocamlformat "disable"]
 end

@@ -98,7 +98,7 @@ let type_tests =
         | _ -> Alcotest.fail "Expected base type Int");
     should_parse_type "function type: Int -> String" "Int -> String" (fun ty ->
         match ty with
-        | Ast.Ty.Fn ([ Ast.Ty.Int ], Ast.Ty.String) -> ()
+        | Ast.Ty.Fn (Ast.Ty.Int, Ast.Ty.String) -> ()
         | _ -> Alcotest.fail "Expected function type Int -> String");
     should_parse_type "Haskell-style parameterized type: Maybe Int" "Maybe Int"
       (fun ty ->
@@ -119,12 +119,11 @@ let decl_tests =
               methods = [ ("eq", [ "a" ], ty) ];
             } -> (
             match ty with
-            | Ast.Ty.Fn
-                ( [ Ast.Ty.TyCons ("a", []); Ast.Ty.TyCons ("a", []) ],
-                  Ast.Ty.Bool ) ->
+            | Ast.Ty.Fn (Ast.Ty.Var "a", Ast.Ty.Fn (Ast.Ty.Var "a", Ast.Ty.Bool))
+              ->
                 ()
-            | _ -> Alcotest.fail "Wrong method signature for eq")
-        | _ -> Alcotest.fail "Expected class Eq[a]");
+            | _ -> Alcotest.fail "Expected method type a -> a -> Bool")
+        | _ -> Alcotest.fail "Expected typeclass declaration");
   ]
 
 let lambda_tests =
