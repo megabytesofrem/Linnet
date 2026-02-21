@@ -218,10 +218,10 @@ let rec parse_atom () : Ast.Expr.t parser =
   match token_opt with
   | Some (T.Number _ as token) ->
       let* _ = advance in
-      return (Ast.Expr.Literal token)
+      return (Ast.Expr.Lit token)
   | Some (T.String _ as token) ->
       let* _ = advance in
-      return (Ast.Expr.Literal token)
+      return (Ast.Expr.Lit token)
   | Some (T.Ident id) ->
       let* _ = advance in
       return (Ast.Expr.Ident id)

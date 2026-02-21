@@ -1,4 +1,15 @@
+(* Unprocessed AST *)
+(* Human readable AST format that will be lowered to Core *)
+
 module T = Lexer.Token
+
+module UnaryOp = struct
+  type t =
+    | Negate (* -x *)
+    | Not    (* !x *)
+
+    [@@ocamlformat "disable"]
+end
 
 module BinOp = struct
   type t = 
@@ -27,9 +38,6 @@ module BinOp = struct
 end
 
 module Ty = struct
-  (* side-effect tracking, later on *)
-  type effect_ty = IO | FS | Network | Random | UserEff of string
-
   type t = 
     | Int | Float | String | Bool | Unit
     | Var of string
@@ -43,9 +51,9 @@ end
 module rec Expr : sig
   type t =
     | Unit (* () *)
-    | Literal of T.t
+    | Lit of T.t
     | Ident of string
-    | Unary of T.t * t
+    | Unary of UnaryOp.t * t
     | Binary of BinOp.t * t * t
     | List of t list  (* [e1, e2, e3] *)
     | Tuple of t list (* (e1, e2, e3) *)
@@ -87,3 +95,33 @@ and Clause : sig
   type t = Where of string * Ty.t option * Expr.t
 end =
   Clause
+
+let binop_to_string bop =
+  match bop with
+  | BinOp.Add -> "+"
+  | BinOp.Sub -> "-"
+  | BinOp.Mul -> "*"
+  | BinOp.Div -> "/"
+  | BinOp.Mod -> "%"
+  | BinOp.Eq -> "=="
+  | BinOp.NotEq -> "!="
+  | BinOp.Less -> "<"
+  | BinOp.LessEq -> "<="
+  | BinOp.Greater -> ">"
+  | BinOp.GreaterEq -> ">="
+  | BinOp.Apply -> "$"
+  | BinOp.Compose -> "."
+
+  (* Monadic/applicative/alternative *)
+  | BinOp.Bind -> ">>="
+  | BinOp.Pipe -> ">>"
+  | BinOp.UFO -> "<*>"
+  | BinOp.Map -> "<$>"
+  | BinOp.Alt -> "<|>"
+  [@@ocamlformat "disable"]
+
+let unaryop_to_string uop =
+  match uop with
+  | UnaryOp.Negate -> "-"
+  | UnaryOp.Not -> "!"
+  [@@ocamlformat "disable"]
